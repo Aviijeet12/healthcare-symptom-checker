@@ -97,31 +97,10 @@ POST https://healthcare-symptom-checker.onrender.com/analyze
 - **Accessibility**: Semantic HTML and ARIA-compliant components
 - **Mobile-First**: Responsive design that works on all devices
 
-## ⚠️ Important Disclaimer
-
-**This application is for educational purposes only and should NOT be used as a substitute for professional medical advice, diagnosis, or treatment.**
-
-- Always consult with a qualified healthcare professional for proper diagnosis
-- This tool provides general information only
-- Do not delay seeking medical attention based on this tool's output
-- In case of emergency, call emergency services immediately
-
 ## 🔒 Privacy & Security
 
 - No personal health information is stored locally
 - API calls are made directly to the backend service
 - No cookies or tracking mechanisms are used
 - User data is not retained after analysis
-
-## 📝 License
-
-This project is open source and available under the MIT License.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📧 Support
-
-For issues, questions, or suggestions, please open an issue on GitHub.
 
