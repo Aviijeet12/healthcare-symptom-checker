@@ -1,5 +1,6 @@
 # 🩺 Healthcare Symptom Checker
-https://healthcare-symptom-checker-sooty.vercel.app/
+- Link to application- https://healthcare-symptom-checker-sooty.vercel.app/
+- if the backend does not accept request please visit (https://healthcare-symptom-checker-backend-xktt.onrender.com) and then try again to the main deployed application link. The render backend sleeps due to inactivity and might not be able to take requests.
 - A modern, interactive web application for educational purposes that helps users understand potential medical conditions based on their symptoms. This tool provides insights into possible conditions and recommended next steps, with clear disclaimers about its educational nature.
 
 ## ✨ Features
