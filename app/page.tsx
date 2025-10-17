@@ -65,7 +65,7 @@ export default function Home() {
           <div className="mb-12 text-center">
             <div className="inline-flex items-center gap-2 mb-4 px-4 py-2 bg-blue-950 rounded-full border border-blue-800">
               <Sparkles className="w-4 h-4 text-blue-400" />
-              <span className="text-sm font-semibold text-blue-300">AI-Powered Health Insights</span>
+              <span className="text-sm font-semibold text-blue-300">LLM-Powered Health Insights(GEMINI)</span>
             </div>
 
             <h1 className="text-5xl md:text-6xl font-bold text-white mb-4 text-balance leading-tight">

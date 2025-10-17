@@ -8,7 +8,7 @@ export default function Footer() {
           <div>
             <h3 className="font-bold text-lg text-white mb-3">HealthCheck</h3>
             <p className="text-slate-400 text-sm leading-relaxed">
-              An AI-powered educational tool designed to help you understand your symptoms better.
+              An LLM-powered educational tool made to help you understand your symptoms better.
             </p>
           </div>
           <div>
@@ -29,9 +29,9 @@ export default function Footer() {
 
         <div className="border-t border-slate-800 pt-8">
           <div className="flex flex-col md:flex-row items-center justify-between">
-            <p className="text-sm text-slate-400">© {currentYear} HealthCheck — Educational Use Only</p>
+            <p className="text-sm text-slate-400">HealthCheck — Educational Use Only</p>
             <p className="text-xs text-slate-500 mt-4 md:mt-0">
-              Always seek professional medical advice for health concerns
+              MADE BY AVIJIT
             </p>
           </div>
         </div>
