@@ -1,5 +1,5 @@
 # 🩺 Healthcare Symptom Checker
-
+https://healthcare-symptom-checker-sooty.vercel.app/
 A modern, interactive web application for educational purposes that helps users understand potential medical conditions based on their symptoms. This tool provides insights into possible conditions and recommended next steps, with clear disclaimers about its educational nature.
 
 ## ✨ Features
@@ -125,6 +125,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 For issues, questions, or suggestions, please open an issue on GitHub.
 
----
-
-**© 2025 Healthcare Symptom Checker — Educational Use Only**
