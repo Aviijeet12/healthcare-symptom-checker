@@ -1,107 +1,163 @@
-# 🩺 Healthcare Symptom Checker
-- Link to application- https://healthcare-symptom-checker-sooty.vercel.app/
-- if the backend does not accept request please visit (https://healthcare-symptom-checker-backend-xktt.onrender.com) and then try again to the main deployed application link. The render backend sleeps due to inactivity and might not be able to take requests.
-- A modern, interactive web application for educational purposes that helps users understand potential medical conditions based on their symptoms. This tool provides insights into possible conditions and recommended next steps, with clear disclaimers about its educational nature.
+Healthcare Symptom Checker
+================================================
 
-## ✨ Features
+- **Application:** [https://healthcare-symptom-checker-sooty.vercel.app/](https://healthcare-symptom-checker-sooty.vercel.app/)
+- **Backend (Render - may be inactive due to sleep mode):** [https://healthcare-symptom-checker-backend-xktt.onrender.com](https://healthcare-symptom-checker-backend-xktt.onrender.com)
+A modern web application that helps users understand potential conditions and general recommendations based on described symptoms. The system consists of a Next.js frontend and a Python (Flask) backend that integrates with Google Gemini for AI-powered analysis. This tool is intended for educational use only and is not a substitute for professional medical advice.
 
-- **Interactive Symptom Input**: User-friendly textarea for describing symptoms in detail
-- **AI-Powered Analysis**: Integrates with a backend API to analyze symptoms
-- **Beautiful Results Display**: Shows probable conditions, recommendations, and important disclaimers
-- **Responsive Design**: Works seamlessly on mobile, tablet, and desktop devices
-- **Professional Healthcare Theme**: Clean, modern interface with healthcare-appropriate colors
-- **Loading States**: Visual feedback during symptom analysis
-- **Error Handling**: Graceful error messages for failed API calls
 
-## 🛠️ Tech Stack
+Overview
+------------------------------------------------
+- Frontend: Next.js 15 (React 19, TypeScript, Tailwind CSS)
+- Backend: Python Flask with CORS
+- AI Model: Google Gemini 2.0 Flash (via Generative Language API)
+- Deployment Targets: Vercel (frontend) and Render (backend)
 
-- **Frontend Framework**: Next.js 15+ with React
-- **Styling**: Tailwind CSS v4 with custom healthcare color palette
-- **Language**: TypeScript
-- **API Integration**: Fetch API for backend communication
-- **Deployment**: Vercel-ready
 
-## 📁 Project Structure
+Monorepo Layout
+------------------------------------------------
 
-\`\`\`
-healthcare-symptom-checker/
-├── app/
-│   ├── layout.tsx           # Root layout with metadata
-│   ├── page.tsx             # Main page component
-│   └── globals.css          # Global styles and theme
-├── components/
-│   ├── header.tsx           # App header
-│   ├── symptom-form.tsx     # Symptom input form
-│   ├── results-card.tsx     # Results display component
-│   └── footer.tsx           # App footer
-├── package.json             # Dependencies
-├── tsconfig.json            # TypeScript configuration
-├── next.config.mjs          # Next.js configuration
-└── README.md                # This file
-\`\`\`
+```
+.
+├─ app/                         # Next.js App Router frontend
+│  ├─ page.tsx
+│  ├─ layout.tsx
+│  └─ api/analyze/route.ts      # Frontend API route proxy to backend
+├─ components/                  # UI components
+├─ public/                      # Static assets
+├─ styles/                      # Global styles
+├─ app.py                       # Flask backend (also duplicated under healthcare-backend/)
+├─ requirements.txt             # Backend Python dependencies
+├─ runtime.txt                  # Backend runtime (Render)
+├─ package.json                 # Frontend dependencies and scripts
+├─ pnpm-lock.yaml
+├─ next.config.mjs
+├─ tsconfig.json
+└─ README.md
+```
 
-## 🚀 Getting Started
 
-### Prerequisites
-- Node.js 18+ 
-- npm or yarn
+Prerequisites
+------------------------------------------------
+- Node.js 18 or newer
+- pnpm (recommended) or npm/yarn
+- Python 3.10+ (for local backend runs)
 
-### Installation
 
-1. **Clone the repository**
-   \`\`\`bash
-   git clone https://github.com/Aviijeet12/healthcare-symptom-checker.git
-   cd healthcare-symptom-checker
-   \`\`\`
+Environment Variables
+------------------------------------------------
 
-2. **Install dependencies**
-   \`\`\`bash
-   npm install
-   \`\`\`
+Frontend (Next.js):
+- NEXT_PUBLIC_BACKEND_URL: Full URL to the backend analyze endpoint. Example:
+  - `https://healthcare-symptom-checker-backend-xktt.onrender.com/analyze`
 
-3. **Run the development server**
-   \`\`\`bash
-   npm run dev
-   \`\`\`
+Backend (Flask):
+- GEMINI_API_KEY: Google Generative Language API key.
 
-4. **Open in browser**
-   Navigate to `http://localhost:3000`
 
-## 📡 API Integration
+Local Development
+------------------------------------------------
 
-### Endpoint
-\`\`\`
-POST https://healthcare-symptom-checker.onrender.com/analyze
-\`\`\`
+1) Clone repository
+```
+git clone https://github.com/Aviijeet12/healthcare-symptom-checker.git
+cd healthcare-symptom-checker
+```
 
-### Request Format
-\`\`\`json
+2) Configure frontend environment
+Create a file named `.env.local` in the repository root:
+```
+NEXT_PUBLIC_BACKEND_URL=https://healthcare-symptom-checker-backend-xktt.onrender.com/analyze
+```
+
+3) Install frontend dependencies and start dev server
+```
+pnpm install
+pnpm dev
+# App will be available at http://localhost:3000
+```
+
+4) Optional: Run backend locally (if you want to test without Render)
+```
+pip install -r requirements.txt
+set FLASK_APP=app.py
+set GEMINI_API_KEY=your_api_key_here
+python app.py
+# Backend runs on http://localhost:10000 by default
+```
+If you run the backend locally, update `NEXT_PUBLIC_BACKEND_URL` accordingly, e.g., `http://localhost:10000/analyze`.
+
+
+Frontend to Backend Flow
+------------------------------------------------
+- The Next.js route `app/api/analyze/route.ts` posts JSON to `NEXT_PUBLIC_BACKEND_URL`.
+- The backend endpoint `/analyze` calls Google Gemini and returns a structured JSON response.
+
+
+API Reference (Backend)
+------------------------------------------------
+Endpoint:
+```
+POST /analyze
+Content-Type: application/json
+```
+
+Request body:
+```
 {
-  "symptoms": "user input text describing symptoms"
+  "symptoms": "free-form text describing symptoms"
 }
-\`\`\`
+```
 
-### Response Format
-\`\`\`json
+Successful response body (example):
+```
 {
-  "conditions": ["Condition 1", "Condition 2"],
-  "recommendations": "Recommended actions and next steps",
-  "disclaimer": "Educational disclaimer text"
+  "conditions": ["Seasonal allergies", "Common cold"],
+  "recommendations": "Stay hydrated, consider over-the-counter antihistamines, and consult a clinician if symptoms persist.",
+  "disclaimer": "Educational purposes only. Not medical advice. Consult a qualified professional."
 }
-\`\`\`
+```
 
-## 🎨 Design Features
+Error responses:
+- 400: Missing or invalid input
+- 500/503/504: Upstream or service error, includes an `error` description and optional `code`/`details`.
 
-- **Color Palette**: Professional healthcare blues with white backgrounds
-- **Typography**: Clean, readable fonts optimized for medical content
-- **Animations**: Smooth transitions and loading states
-- **Accessibility**: Semantic HTML and ARIA-compliant components
-- **Mobile-First**: Responsive design that works on all devices
 
-## 🔒 Privacy & Security
+Deployment
+------------------------------------------------
 
-- No personal health information is stored locally
-- API calls are made directly to the backend service
-- No cookies or tracking mechanisms are used
-- User data is not retained after analysis
+Backend (Render):
+- Root contains `app.py`, `requirements.txt`, and `runtime.txt`.
+- Add environment variable `GEMINI_API_KEY` in Render dashboard.
+- Deploy the service; verify health at `/` and the main endpoint at `/analyze`.
 
+Frontend (Vercel):
+- Import the GitHub repository in Vercel.
+- Add environment variable `NEXT_PUBLIC_BACKEND_URL` with the full Render URL ending in `/analyze`.
+- Use default build settings for Next.js 15 (no custom commands needed).
+- Trigger deployment and verify the app.
+
+
+Troubleshooting
+------------------------------------------------
+- 404 model not found from Gemini: Ensure the model path is `models/gemini-2.0-flash:generateContent`.
+- 500 from backend: Confirm `GEMINI_API_KEY` is set in Render and not rate-limited; check Render logs.
+- Request timeout from frontend: Backend free tier can be slow. Try again or increase timeout if self-hosted.
+- Mixed environments: Confirm `NEXT_PUBLIC_BACKEND_URL` matches the backend environment you intend to use.
+
+
+Security & Privacy
+------------------------------------------------
+- The application does not persist user inputs.
+- Do not log sensitive medical information in production logs.
+- Treat API keys as secrets; never commit them to source control.
+
+
+Disclaimer
+------------------------------------------------
+This application is provided for educational purposes only and does not constitute medical advice, diagnosis, or treatment. Always consult a qualified healthcare professional for medical concerns or emergencies.
+
+
+License
+------------------------------------------------
+This project is open source and available under the MIT License.
