@@ -6,7 +6,7 @@ export default function Footer() {
       <div className="max-w-7xl mx-auto px-4 py-12">
         <div className="grid md:grid-cols-3 gap-8 mb-8">
           <div>
-            <h3 className="font-bold text-lg text-white mb-3">HealthCheck</h3>
+            <h3 className="font-bold text-lg text-white mb-3">Symptom Checker</h3>
             <p className="text-slate-400 text-sm leading-relaxed">
               An LLM-powered educational tool made to help you understand your symptoms better.
             </p>
@@ -16,7 +16,7 @@ export default function Footer() {
             <ul className="space-y-2 text-sm text-slate-400">
               <li>• Educational use only</li>
               <li>• Not a medical diagnosis</li>
-              <li>• Consult healthcare professionals</li>
+              <li>• Consult licensed medical professionals</li>
             </ul>
           </div>
           <div>
@@ -29,7 +29,7 @@ export default function Footer() {
 
         <div className="border-t border-slate-800 pt-8">
           <div className="flex flex-col md:flex-row items-center justify-between">
-            <p className="text-sm text-slate-400">HealthCheck — Educational Use Only</p>
+            <p className="text-sm text-slate-400">Symptom Checker — Educational Use Only</p>
             <p className="text-xs text-slate-500 mt-4 md:mt-0">
               MADE BY AVIJIT
             </p>

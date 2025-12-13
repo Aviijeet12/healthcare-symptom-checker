@@ -79,7 +79,7 @@ export default function SymptomForm({ onSubmit, loading }: SymptomFormProps) {
       <div className="bg-blue-950/50 border border-blue-800 rounded-lg p-3">
         <p className="text-xs text-blue-300 font-medium">
           ℹ️ This analysis is for educational purposes only and should not replace professional medical advice. Always
-          consult a healthcare provider.
+          consult a licensed medical provider.
         </p>
       </div>
     </form>

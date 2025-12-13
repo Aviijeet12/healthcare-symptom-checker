@@ -6,7 +6,7 @@ export async function POST(request: Request) {
     console.log("[v0] Attempting to fetch from:", backendUrl)
 
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 20000) // 20 second timeout to avoid premature 504s
 
     try {
       const response = await fetch(backendUrl, {

@@ -1,17 +1,17 @@
-# 🚀 Deployment Instructions - Healthcare Symptom Checker
+# 🚀 Deployment Instructions - Symptom Checker
 
-## ✅ Backend Update: Switched from Groq to Gemini API
+## ✅ Backend Update: Switched to OpenAI LLM
 
-The backend has been updated to use **Google Gemini API** instead of Groq for better reliability and availability.
+The backend now uses the **OpenAI Responses API** for faster, more reliable analysis.
 
 ---
 
-## 📝 Step 1: Get Your Free Gemini API Key
+## 📝 Step 1: Get Your OpenAI API Key
 
-1. **Go to Google AI Studio**: https://aistudio.google.com/app/apikey
-2. **Sign in** with your Google account
-3. Click **"Get API Key"** or **"Create API Key"**
-4. **Copy** the API key (it starts with `AIza...`)
+1. **Go to OpenAI Dashboard**: https://platform.openai.com/api-keys
+2. **Sign in** with your OpenAI account (or create one)
+3. Click **"Create new secret key"**
+4. **Copy** the API key (it starts with `sk-...`)
 
 ---
 
@@ -23,19 +23,29 @@ The backend has been updated to use **Google Gemini API** instead of Groq for be
 4. Go to **"Environment"** tab (left sidebar)
 5. Click **"Add Environment Variable"**
 6. Add the following:
-   - **Key**: `GEMINI_API_KEY`
-   - **Value**: Paste your Gemini API key (from Step 1)
-7. Click **"Save Changes"**
+   - **Key**: `OPENAI_API_KEY`
+   - **Value**: Paste your OpenAI API key (from Step 1)
+7. (Optional) Add `OPENAI_MODEL` if you want to override the default `gpt-4o-mini`
+8. Click **"Save Changes"**
 
 ---
 
-## 🚢 Step 3: Deploy Updated Backend Code
+## 🗂️ Step 3: Point Render to the backend folder
+
+1. In the Render service settings, set **Root Directory** to `healthcare-backend`
+2. Use **Build Command** `pip install -r requirements.txt`
+3. Use **Start Command** `python app.py`
+4. Save the changes so future deploys target the isolated backend folder
+
+---
+
+## 🚢 Step 4: Deploy Updated Backend Code
 
 ### Option A: Deploy via GitHub (Recommended)
 1. **Commit the changes**:
    ```bash
    git add healthcare-backend/app.py
-   git commit -m "Switch from Groq to Gemini API for better reliability"
+   git commit -m "Switch backend to OpenAI Responses API"
    git push origin main
    ```
 2. **Render will auto-deploy** (if connected to GitHub)
@@ -47,51 +57,51 @@ The backend has been updated to use **Google Gemini API** instead of Groq for be
 
 ---
 
-## ✅ Step 4: Verify the Deployment
+## ✅ Step 5: Verify the Deployment
 
 1. **Wait for deployment to complete** (usually 2-5 minutes)
 2. **Test the backend**:
    - Open: `https://healthcare-symptom-checker-backend-xktt.onrender.com`
-   - You should see: `"Healthcare Symptom Checker Backend with Gemini AI is running! ✅"`
+   - You should see: `"Symptom Checker backend with LLM-Powered AI is running! ✅"`
 3. **Test the frontend**: Open `http://localhost:3000` and try analyzing symptoms
 
 ---
 
 ## 🎉 That's it!
 
-Your healthcare symptom checker should now be fully functional with Gemini AI!
+Your Symptom Checker should now be fully functional with OpenAI!
 
 ---
 
 ## 🆘 Troubleshooting
 
 ### If you get "API key not configured" error:
-- Make sure you added `GEMINI_API_KEY` (not `GROQ_API_KEY`) in Render
+- Make sure you added `OPENAI_API_KEY` in Render
 - Make sure the service restarted after adding the environment variable
 
-### If you get "Gemini API error":
-- Check if your API key is valid at https://aistudio.google.com/app/apikey
-- Make sure you didn't exceed the free tier limits (60 requests per minute)
+### If you get "OpenAI API error":
+- Check if your API key is valid at https://platform.openai.com/api-keys
+- Make sure the account has sufficient quota and the selected model is available in your region
 
 ### If the backend doesn't update:
 - Go to Render → Click "Manual Deploy" → "Clear build cache & deploy"
 
 ---
 
-## 📊 API Limits (Free Tier)
+## 📊 API Considerations
 
-Gemini Pro (Free):
-- **Rate Limit**: 60 requests per minute
-- **Daily Limit**: 1,500 requests per day
-- **Perfect for**: Testing, development, and small projects
+OpenAI Usage:
+- Rate limits depend on your OpenAI subscription tier
+- Track usage from https://platform.openai.com/usage
+- Create multiple keys for staging vs. production environments if needed
 
 ---
 
 ## 💡 Next Steps
 
-1. Get your Gemini API key
+1. Get your OpenAI API key
 2. Add it to Render environment variables
 3. Deploy the updated backend
-4. Test your symptom checker!
+4. Test your Symptom Checker!
 
 Good luck! 🎊

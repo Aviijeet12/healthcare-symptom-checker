@@ -27,14 +27,14 @@ export default function Header() {
               <Heart className="w-6 h-6 text-white fill-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white">UNTHINKABLE - HEALTHCHECK</h1>
-              <p className="text-xs text-slate-400 font-medium">LLM Powered Symptom Checker</p>
+              <h1 className="text-xl font-bold text-white">Symptom Checker</h1>
+              <p className="text-xs text-slate-400 font-medium">LLM-Powered insights on demand</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 px-4 py-2 bg-green-950 rounded-full border border-green-800">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-xs font-semibold text-green-400">GEMINI ACTIVE</span>
+            <span className="text-xs font-semibold text-green-400">LLM-OpenAI ACTIVE</span>
           </div>
         </div>
       </div>

@@ -6,7 +6,11 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "backend:install": "cd healthcare-backend && pip install -r requirements.txt",
+    "backend:dev": "cd healthcare-backend && python app.py",
+    "test:backend": "cd healthcare-backend && python tests/smoke_test.py",
+    "check:all": "pnpm lint && pnpm test:backend"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

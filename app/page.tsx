@@ -65,7 +65,7 @@ export default function Home() {
           <div className="mb-12 text-center">
             <div className="inline-flex items-center gap-2 mb-4 px-4 py-2 bg-blue-950 rounded-full border border-blue-800">
               <Sparkles className="w-4 h-4 text-blue-400" />
-              <span className="text-sm font-semibold text-blue-300">LLM-Powered Health Insights(GEMINI)</span>
+              <span className="text-sm font-semibold text-blue-300">LLM-Powered Symptom Insights</span>
             </div>
 
             <h1 className="text-5xl md:text-6xl font-bold text-white mb-4 text-balance leading-tight">
@@ -109,7 +109,7 @@ export default function Home() {
               <div className="bg-slate-800/60 backdrop-blur rounded-xl border border-slate-700 p-6 hover:shadow-lg hover:border-blue-600 transition-all">
                 <div className="text-3xl mb-3">🛡️</div>
                 <h3 className="font-semibold text-white mb-2">Professional Guidance</h3>
-                <p className="text-sm text-slate-400">Always consult healthcare professionals for diagnosis</p>
+                <p className="text-sm text-slate-400">Always consult licensed medical professionals for diagnosis</p>
               </div>
             </div>
           )}

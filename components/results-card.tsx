@@ -81,8 +81,8 @@ export default function ResultsCard({ results }: ResultsCardProps) {
               <p className="text-sm text-red-200 leading-relaxed font-medium">{results.disclaimer}</p>
               <div className="bg-slate-800 rounded-lg p-4 border border-red-800">
                 <p className="text-sm text-red-300 font-semibold">
-                  ⚕️ Always consult with a qualified healthcare professional for proper diagnosis and treatment. This
-                  tool is for educational purposes only.
+                  ⚕️ Always consult with a qualified medical professional for proper diagnosis and treatment. This tool
+                  is for educational purposes only.
                 </p>
               </div>
             </div>
