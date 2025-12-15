@@ -20,7 +20,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className="bg-slate-950 text-white">
+      <body className={`${_geist.className} ${_geistMono.className} bg-slate-950 text-white`}>
         {children}
         <Analytics />
       </body>

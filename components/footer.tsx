@@ -29,7 +29,7 @@ export default function Footer() {
 
         <div className="border-t border-slate-800 pt-8">
           <div className="flex flex-col md:flex-row items-center justify-between">
-            <p className="text-sm text-slate-400">Symptom Checker — Educational Use Only</p>
+            <p className="text-sm text-slate-400">© {currentYear} Symptom Checker — Educational Use Only</p>
             <p className="text-xs text-slate-500 mt-4 md:mt-0">
               MADE BY AVIJIT
             </p>
