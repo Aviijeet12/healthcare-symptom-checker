@@ -57,36 +57,74 @@ def _fallback_result(reason: str) -> dict:
     }
 
 
-def _gemini_generate_url() -> str:
+def _gemini_generate_url(model: str | None = None) -> str:
     base = GEMINI_API_BASE_URL.rstrip("/")
-    path = f"/models/{GEMINI_MODEL}:generateContent"
+    effective_model = (model or GEMINI_MODEL).strip()
+    path = f"/models/{effective_model}:generateContent"
     return f"{base}{path}?{urlencode({'key': GEMINI_API_KEY or ''})}"
 
 
-def _post_gemini(payload: dict) -> requests.Response:
+def _post_gemini(payload: dict, model: str | None = None) -> requests.Response:
     return requests.post(
-        _gemini_generate_url(),
+        _gemini_generate_url(model=model),
         headers={"Content-Type": "application/json"},
         json=payload,
         timeout=30,
     )
 
 
-def _post_gemini_with_retries(payload: dict) -> requests.Response:
+def _post_gemini_with_retries(payload: dict, model: str | None = None) -> requests.Response:
     """Retry a few times on transient provider errors (e.g., 429/5xx)."""
 
     # Keep total retry delay small so the frontend doesn't time out.
     backoffs = (0.6, 1.2)
-    response = _post_gemini(payload)
+    response = _post_gemini(payload, model=model)
 
     for delay in backoffs:
         if response.status_code in (429, 500, 502, 503, 504):
             time.sleep(delay)
-            response = _post_gemini(payload)
+            response = _post_gemini(payload, model=model)
         else:
             break
 
     return response
+
+
+def _unique_nonempty_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        cleaned = (value or "").strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            result.append(cleaned)
+    return result
+
+
+def _post_gemini_try_models(payload: dict, models: list[str]) -> tuple[requests.Response, str]:
+    """Try multiple model IDs when the provider returns 404 (model not found).
+
+    Returns the first non-404 response, or the last response if all attempts 404.
+    """
+
+    model_candidates = _unique_nonempty_strings(models)
+    if not model_candidates:
+        response = _post_gemini_with_retries(payload)
+        return response, GEMINI_MODEL
+
+    last_response: requests.Response | None = None
+    last_model: str = model_candidates[0]
+
+    for model in model_candidates:
+        last_model = model
+        response = _post_gemini_with_retries(payload, model=model)
+        last_response = response
+        if response.status_code != 404:
+            return response, model
+
+    # All attempts were 404
+    assert last_response is not None
+    return last_response, last_model
 
 
 def _extract_gemini_text(response_json: dict) -> str:
@@ -181,7 +219,17 @@ Return ONLY valid JSON, no other text or markdown."""
             },
         }
 
-        response = _post_gemini_with_retries(payload)
+        # Some deployments end up with a model ID that Gemini doesn't recognize (404).
+        # Try a couple of common alternatives before giving up.
+        response, _model_used = _post_gemini_try_models(
+            payload,
+            models=[
+                GEMINI_MODEL,
+                "gemini-1.5-flash",
+                "gemini-1.5-flash-latest",
+                "gemini-2.0-flash",
+            ],
+        )
 
         if response.status_code == 200:
             ai_response = response.json()
