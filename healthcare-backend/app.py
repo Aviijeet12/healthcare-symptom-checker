@@ -26,9 +26,15 @@ app = Flask(__name__)
 CORS(app)
 
 # Gemini API configuration
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-GEMINI_API_BASE_URL = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")
+_raw_gemini_key = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = _raw_gemini_key.strip() if isinstance(_raw_gemini_key, str) else None
+
+_raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL = _raw_gemini_model.strip() if isinstance(_raw_gemini_model, str) else "gemini-1.5-flash"
+
+# Prefer v1 (newer). We'll also fall back to v1beta automatically when needed.
+_raw_base_url = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com/v1")
+GEMINI_API_BASE_URL = _raw_base_url.strip() if isinstance(_raw_base_url, str) else "https://generativelanguage.googleapis.com/v1"
 
 # When enabled, the backend will return a safe, educational fallback response when
 # the LLM provider is unavailable/rate-limited, instead of failing the request.
@@ -57,33 +63,37 @@ def _fallback_result(reason: str) -> dict:
     }
 
 
-def _gemini_generate_url(model: str | None = None) -> str:
-    base = GEMINI_API_BASE_URL.rstrip("/")
+def _gemini_generate_url(model: str | None = None, base_url: str | None = None) -> str:
+    base = (base_url or GEMINI_API_BASE_URL).rstrip("/")
     effective_model = (model or GEMINI_MODEL).strip()
     path = f"/models/{effective_model}:generateContent"
     return f"{base}{path}?{urlencode({'key': GEMINI_API_KEY or ''})}"
 
 
-def _post_gemini(payload: dict, model: str | None = None) -> requests.Response:
+def _post_gemini(payload: dict, model: str | None = None, base_url: str | None = None) -> requests.Response:
     return requests.post(
-        _gemini_generate_url(model=model),
+        _gemini_generate_url(model=model, base_url=base_url),
         headers={"Content-Type": "application/json"},
         json=payload,
         timeout=30,
     )
 
 
-def _post_gemini_with_retries(payload: dict, model: str | None = None) -> requests.Response:
+def _post_gemini_with_retries(
+    payload: dict,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> requests.Response:
     """Retry a few times on transient provider errors (e.g., 429/5xx)."""
 
     # Keep total retry delay small so the frontend doesn't time out.
     backoffs = (0.6, 1.2)
-    response = _post_gemini(payload, model=model)
+    response = _post_gemini(payload, model=model, base_url=base_url)
 
     for delay in backoffs:
         if response.status_code in (429, 500, 502, 503, 504):
             time.sleep(delay)
-            response = _post_gemini(payload, model=model)
+            response = _post_gemini(payload, model=model, base_url=base_url)
         else:
             break
 
@@ -123,6 +133,53 @@ def _post_gemini_try_models(payload: dict, models: list[str]) -> tuple[requests.
             return response, model
 
     # All attempts were 404
+    assert last_response is not None
+    return last_response, last_model
+
+
+def _post_gemini_try_targets(payload: dict, models: list[str], base_urls: list[str]) -> tuple[requests.Response, str, str]:
+    """Try combinations of base URLs and model IDs to avoid 404s.
+
+    Some environments have model IDs available only under a specific API version
+    (e.g., v1 vs v1beta). This method tries a small set of candidates.
+    """
+
+    base_candidates = _unique_nonempty_strings(base_urls)
+    if not base_candidates:
+        base_candidates = [GEMINI_API_BASE_URL]
+
+    last_response: requests.Response | None = None
+    last_model = GEMINI_MODEL
+    last_base = GEMINI_API_BASE_URL
+
+    for base in base_candidates:
+        response, model_used = _post_gemini_try_models_with_base(payload, models=models, base_url=base)
+        last_response = response
+        last_model = model_used
+        last_base = base
+        if response.status_code != 404:
+            return response, model_used, base
+
+    assert last_response is not None
+    return last_response, last_model, last_base
+
+
+def _post_gemini_try_models_with_base(payload: dict, models: list[str], base_url: str) -> tuple[requests.Response, str]:
+    model_candidates = _unique_nonempty_strings(models)
+    if not model_candidates:
+        response = _post_gemini_with_retries(payload, base_url=base_url)
+        return response, GEMINI_MODEL
+
+    last_response: requests.Response | None = None
+    last_model: str = model_candidates[0]
+
+    for model in model_candidates:
+        last_model = model
+        response = _post_gemini_with_retries(payload, model=model, base_url=base_url)
+        last_response = response
+        if response.status_code != 404:
+            return response, model
+
     assert last_response is not None
     return last_response, last_model
 
@@ -219,15 +276,20 @@ Return ONLY valid JSON, no other text or markdown."""
             },
         }
 
-        # Some deployments end up with a model ID that Gemini doesn't recognize (404).
-        # Try a couple of common alternatives before giving up.
-        response, _model_used = _post_gemini_try_models(
+        # Some deployments end up with a model ID or API version that Gemini doesn't recognize (404).
+        # Try a couple of common alternatives (models + v1/v1beta) before giving up.
+        response, _model_used, _base_used = _post_gemini_try_targets(
             payload,
             models=[
                 GEMINI_MODEL,
                 "gemini-1.5-flash",
                 "gemini-1.5-flash-latest",
                 "gemini-2.0-flash",
+            ],
+            base_urls=[
+                GEMINI_API_BASE_URL,
+                "https://generativelanguage.googleapis.com/v1",
+                "https://generativelanguage.googleapis.com/v1beta",
             ],
         )
 
