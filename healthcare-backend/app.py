@@ -128,16 +128,60 @@ Return ONLY valid JSON, no other text or markdown."""
 
             return jsonify(result)
 
+        # Bubble up common provider-side errors with a friendlier, stable shape.
+        provider_message = None
+        try:
+            provider_payload = response.json()
+            provider_message = (
+                provider_payload.get("error", {}) or {}
+            ).get("message")
+        except Exception:  # noqa: BLE001
+            provider_payload = None
+
+        if response.status_code == 429:
+            return (
+                jsonify(
+                    {
+                        "error": "LLM provider rate limit or quota exceeded. Please try again later.",
+                        "code": "LLM_RATE_LIMIT",
+                        "llm_status": response.status_code,
+                        "llm_message": provider_message,
+                        "conditions": [],
+                        "recommendations": "Try again in a few minutes. If the issue persists, check your OpenAI billing/usage limits.",
+                        "disclaimer": "Please try again later",
+                    }
+                ),
+                503,
+            )
+
+        if response.status_code in (401, 403):
+            return (
+                jsonify(
+                    {
+                        "error": "LLM provider authentication failed. Backend is not configured correctly.",
+                        "code": "LLM_AUTH_ERROR",
+                        "llm_status": response.status_code,
+                        "conditions": [],
+                        "recommendations": "Verify OPENAI_API_KEY is set correctly in the backend environment.",
+                        "disclaimer": "Please contact the administrator",
+                    }
+                ),
+                500,
+            )
+
         return (
             jsonify(
                 {
-                    "error": f"LLM service error: {response.status_code}",
+                    "error": "LLM service error",
+                    "code": "LLM_ERROR",
+                    "llm_status": response.status_code,
+                    "llm_message": provider_message,
                     "conditions": [],
                     "recommendations": "AI service temporarily unavailable",
                     "disclaimer": "Please try again later",
                 }
             ),
-            500,
+            503,
         )
 
     except Exception as exc:  # pylint: disable=broad-except
