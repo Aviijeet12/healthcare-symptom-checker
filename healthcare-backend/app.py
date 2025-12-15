@@ -45,11 +45,14 @@ def home():
 @app.route("/analyze", methods=["POST"])
 def analyze_symptoms():
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON data received"}), 400
+        # Use silent=True so malformed JSON or missing content-type returns None
+        # instead of raising a BadRequest exception.
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "Invalid or missing JSON body"}), 400
 
-        symptoms = data.get("symptoms", "").strip()
+        symptoms_value = data.get("symptoms", "")
+        symptoms = symptoms_value.strip() if isinstance(symptoms_value, str) else ""
         if not symptoms:
             return jsonify({"error": "No symptoms provided"}), 400
 
