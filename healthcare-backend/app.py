@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 import requests
@@ -27,6 +28,50 @@ CORS(app)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_API_URL = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions")
+RETURN_FALLBACK_ON_LLM_ERROR = os.getenv("RETURN_FALLBACK_ON_LLM_ERROR", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+
+
+def _fallback_result(reason: str) -> dict:
+    return {
+        "conditions": ["AI analysis temporarily unavailable"],
+        "recommendations": (
+            "We couldn't run the AI analysis right now (service is busy). "
+            "If symptoms are severe, worsening, or include chest pain, trouble breathing, confusion, fainting, "
+            "or signs of stroke, seek urgent medical care. Otherwise, consider rest, hydration, and monitoring "
+            "your symptoms, and consult a licensed medical professional for proper evaluation."
+        ),
+        "disclaimer": (
+            f"Educational use only. Not a diagnosis. ({reason}) "
+            "Always consult a qualified medical professional."
+        ),
+    }
+
+
+def _post_openai(payload: dict, headers: dict) -> requests.Response:
+    return requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=30)
+
+
+def _post_openai_with_retries(payload: dict, headers: dict) -> requests.Response:
+    """Retry a few times on transient provider errors (e.g., 429/5xx)."""
+
+    # Keep total retry delay small so the frontend doesn't time out.
+    backoffs = (0.6, 1.2)
+    response = _post_openai(payload, headers)
+
+    for delay in backoffs:
+        if response.status_code in (429, 500, 502, 503, 504):
+            time.sleep(delay)
+            response = _post_openai(payload, headers)
+        else:
+            break
+
+    return response
 
 
 @app.route("/")
@@ -103,7 +148,7 @@ Return ONLY valid JSON, no other text or markdown."""
             "Authorization": f"Bearer {OPENAI_API_KEY}",
         }
 
-        response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=30)
+        response = _post_openai_with_retries(payload, headers)
 
         if response.status_code == 200:
             ai_response = response.json()
@@ -139,6 +184,9 @@ Return ONLY valid JSON, no other text or markdown."""
             provider_payload = None
 
         if response.status_code == 429:
+            if RETURN_FALLBACK_ON_LLM_ERROR:
+                return jsonify(_fallback_result("AI provider rate limit or quota exceeded"))
+
             return (
                 jsonify(
                     {
@@ -168,6 +216,9 @@ Return ONLY valid JSON, no other text or markdown."""
                 ),
                 500,
             )
+
+        if RETURN_FALLBACK_ON_LLM_ERROR:
+            return jsonify(_fallback_result(f"AI provider error {response.status_code}"))
 
         return (
             jsonify(
