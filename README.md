@@ -4,14 +4,14 @@ Symptom Checker
 - Demo Video Link - [https://drive.google.com/file/d/1MQCe32v8qqew1ZcJ2wRegZezT9dL4K2r/view?usp=sharing](https://drive.google.com/file/d/1MQCe32v8qqew1ZcJ2wRegZezT9dL4K2r/view?usp=sharing)
 - **Application:** [https://healthcare-symptom-checker-sooty.vercel.app/](https://healthcare-symptom-checker-sooty.vercel.app/)
 - **Backend (Render - may be inactive due to sleep mode):** [https://healthcare-symptom-checker-backend-xktt.onrender.com](https://healthcare-symptom-checker-backend-xktt.onrender.com)
-- A modern web application that helps users understand potential conditions and general recommendations based on described symptoms. The system consists of a Next.js frontend and a Python (Flask) backend that integrates with an OpenAI LLM for analysis. This tool is intended for educational use only and is not a substitute for professional medical advice.
+- A modern web application that helps users understand potential conditions and general recommendations based on described symptoms. The system consists of a Next.js frontend and a Python (Flask) backend that integrates with a Gemini LLM for analysis. This tool is intended for educational use only and is not a substitute for professional medical advice.
 
 
 Overview
 ------------------------------------------------
 - Frontend: Next.js 15 (React 19, TypeScript, Tailwind CSS)
 - Backend: Python Flask with CORS
-- AI Model: OpenAI GPT-4o mini (configurable via environment variable)
+- AI Model: Google Gemini (configurable via environment variable)
 - Deployment Targets: Vercel (frontend) and Render (backend)
 
 
@@ -27,7 +27,7 @@ Monorepo Layout
 ├─ components/                  # UI components
 ├─ public/                      # Static assets
 ├─ styles/                      # Global styles
-├─ healthcare-backend/          # Flask + OpenAI backend deployed to Render
+├─ healthcare-backend/          # Flask + Gemini backend deployed to Render
 │  ├─ app.py
 │  ├─ requirements.txt
 │  └─ runtime.txt
@@ -56,8 +56,8 @@ Environment Variables
   - `https://healthcare-symptom-checker-backend-xktt.onrender.com/analyze`
 
 Backend (Flask):
-- OPENAI_API_KEY: OpenAI API key with access to Responses/Chat Completions.
-- OPENAI_MODEL (optional): Override the default `gpt-4o-mini` model name.
+- GEMINI_API_KEY: Gemini API key.
+- GEMINI_MODEL (optional): Override the default `gemini-1.5-flash` model name.
 - Place these in `healthcare-backend/.env` for local development (automatically loaded via `python-dotenv`).
 
 Environment templates are provided:
@@ -88,7 +88,7 @@ copy healthcare-backend\.env.example healthcare-backend\.env
 # or
 cp healthcare-backend/.env.example healthcare-backend/.env
 ```
-Set `OPENAI_API_KEY` (and optional overrides) inside `healthcare-backend/.env`.
+Set `GEMINI_API_KEY` (and optional overrides) inside `healthcare-backend/.env`.
 
 4) Install frontend dependencies
 ```
@@ -116,7 +116,7 @@ pnpm dev
 Frontend to Backend Flow
 ------------------------------------------------
 - The Next.js route `app/api/analyze/route.ts` posts JSON to `NEXT_PUBLIC_BACKEND_URL`.
-- The backend endpoint `/analyze` (hosted under `healthcare-backend/`) calls the configured OpenAI model and returns a structured JSON response.
+- The backend endpoint `/analyze` (hosted under `healthcare-backend/`) calls the configured Gemini model and returns a structured JSON response.
 
 
 API Reference (Backend)
@@ -155,7 +155,7 @@ Backend (Render):
 - Set **Root Directory** to `healthcare-backend`.
 - Build Command: `pip install -r requirements.txt`
 - Start Command: `python app.py`
-- Add environment variable `OPENAI_API_KEY` in the Render dashboard (and optional `OPENAI_MODEL`).
+- Add environment variable `GEMINI_API_KEY` in the Render dashboard (and optional `GEMINI_MODEL`).
 - Deploy the service; verify health at `/` and the main endpoint at `/analyze`.
 
 Frontend (Vercel):
@@ -176,8 +176,8 @@ See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for an end-to-end sequence cove
 
 Troubleshooting
 ------------------------------------------------
-- 404/429 errors from OpenAI: Ensure the model name is correct (default `gpt-4o-mini`) and that your key has sufficient quota.
-- 500 from backend: Confirm `OPENAI_API_KEY` is set in Render and not rate-limited; check Render logs.
+- 404/429 errors from Gemini: Ensure the model name is correct (default `gemini-1.5-flash`) and that your key has sufficient quota.
+- 500 from backend: Confirm `GEMINI_API_KEY` is set in Render and not rate-limited; check Render logs.
 - Request timeout from frontend: Backend free tier can be slow. Try again or increase timeout if self-hosted.
 - Mixed environments: Confirm `NEXT_PUBLIC_BACKEND_URL` matches the backend environment you intend to use.
 

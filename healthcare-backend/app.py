@@ -11,6 +11,7 @@ import json
 import os
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 import requests
 from dotenv import load_dotenv
@@ -24,10 +25,13 @@ load_dotenv(BASE_DIR / ".env")
 app = Flask(__name__)
 CORS(app)
 
-# OpenAI API configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-OPENAI_API_URL = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions")
+# Gemini API configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_API_BASE_URL = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")
+
+# When enabled, the backend will return a safe, educational fallback response when
+# the LLM provider is unavailable/rate-limited, instead of failing the request.
 RETURN_FALLBACK_ON_LLM_ERROR = os.getenv("RETURN_FALLBACK_ON_LLM_ERROR", "1").lower() in {
     "1",
     "true",
@@ -53,25 +57,51 @@ def _fallback_result(reason: str) -> dict:
     }
 
 
-def _post_openai(payload: dict, headers: dict) -> requests.Response:
-    return requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=30)
+def _gemini_generate_url() -> str:
+    base = GEMINI_API_BASE_URL.rstrip("/")
+    path = f"/models/{GEMINI_MODEL}:generateContent"
+    return f"{base}{path}?{urlencode({'key': GEMINI_API_KEY or ''})}"
 
 
-def _post_openai_with_retries(payload: dict, headers: dict) -> requests.Response:
+def _post_gemini(payload: dict) -> requests.Response:
+    return requests.post(
+        _gemini_generate_url(),
+        headers={"Content-Type": "application/json"},
+        json=payload,
+        timeout=30,
+    )
+
+
+def _post_gemini_with_retries(payload: dict) -> requests.Response:
     """Retry a few times on transient provider errors (e.g., 429/5xx)."""
 
     # Keep total retry delay small so the frontend doesn't time out.
     backoffs = (0.6, 1.2)
-    response = _post_openai(payload, headers)
+    response = _post_gemini(payload)
 
     for delay in backoffs:
         if response.status_code in (429, 500, 502, 503, 504):
             time.sleep(delay)
-            response = _post_openai(payload, headers)
+            response = _post_gemini(payload)
         else:
             break
 
     return response
+
+
+def _extract_gemini_text(response_json: dict) -> str:
+    candidates = response_json.get("candidates") or []
+    if not candidates:
+        raise ValueError("Gemini returned no candidates")
+    content = (candidates[0] or {}).get("content") or {}
+    parts = content.get("parts") or []
+    text_parts = []
+    for part in parts:
+        if isinstance(part, dict) and isinstance(part.get("text"), str):
+            text_parts.append(part["text"])
+    if not text_parts:
+        raise ValueError("Gemini candidate contained no text")
+    return "\n".join(text_parts)
 
 
 @app.route("/")
@@ -101,11 +131,11 @@ def analyze_symptoms():
         if not symptoms:
             return jsonify({"error": "No symptoms provided"}), 400
 
-        if not OPENAI_API_KEY:
+        if not GEMINI_API_KEY:
             return (
                 jsonify(
                     {
-                        "error": "OpenAI API key not configured",
+                        "error": "Gemini API key not configured",
                         "conditions": [],
                         "recommendations": "Service configuration error",
                         "disclaimer": "Please contact administrator",
@@ -131,28 +161,31 @@ Keep it educational, non-alarming, and emphasize this is not medical diagnosis.
 Return ONLY valid JSON, no other text or markdown."""
 
         payload = {
-            "model": OPENAI_MODEL,
-            "temperature": 0.7,
-            "max_tokens": 500,
-            "messages": [
+            "contents": [
                 {
-                    "role": "system",
-                    "content": "You are an empathetic medical information assistant. Provide educational, non-emergency guidance only and remind users to consult licensed clinicians.",
-                },
-                {"role": "user", "content": prompt},
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": (
+                                "You are an empathetic medical information assistant. "
+                                "Provide educational, non-emergency guidance only and remind users to consult licensed clinicians.\n\n"
+                                + prompt
+                            )
+                        }
+                    ],
+                }
             ],
+            "generationConfig": {
+                "temperature": 0.7,
+                "maxOutputTokens": 500,
+            },
         }
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-        }
-
-        response = _post_openai_with_retries(payload, headers)
+        response = _post_gemini_with_retries(payload)
 
         if response.status_code == 200:
             ai_response = response.json()
-            ai_content = ai_response["choices"][0]["message"]["content"]
+            ai_content = _extract_gemini_text(ai_response)
 
             try:
                 cleaned_content = ai_content.strip()
@@ -175,11 +208,12 @@ Return ONLY valid JSON, no other text or markdown."""
 
         # Bubble up common provider-side errors with a friendlier, stable shape.
         provider_message = None
+        provider_status = None
         try:
             provider_payload = response.json()
-            provider_message = (
-                provider_payload.get("error", {}) or {}
-            ).get("message")
+            provider_error = provider_payload.get("error") or {}
+            provider_message = provider_error.get("message")
+            provider_status = provider_error.get("status")
         except Exception:  # noqa: BLE001
             provider_payload = None
 
@@ -193,9 +227,10 @@ Return ONLY valid JSON, no other text or markdown."""
                         "error": "LLM provider rate limit or quota exceeded. Please try again later.",
                         "code": "LLM_RATE_LIMIT",
                         "llm_status": response.status_code,
+                        "llm_provider_status": provider_status,
                         "llm_message": provider_message,
                         "conditions": [],
-                        "recommendations": "Try again in a few minutes. If the issue persists, check your OpenAI billing/usage limits.",
+                        "recommendations": "Try again in a few minutes. If the issue persists, check your Google AI/Gemini billing and quota limits.",
                         "disclaimer": "Please try again later",
                     }
                 ),
@@ -209,8 +244,10 @@ Return ONLY valid JSON, no other text or markdown."""
                         "error": "LLM provider authentication failed. Backend is not configured correctly.",
                         "code": "LLM_AUTH_ERROR",
                         "llm_status": response.status_code,
+                        "llm_provider_status": provider_status,
+                        "llm_message": provider_message,
                         "conditions": [],
-                        "recommendations": "Verify OPENAI_API_KEY is set correctly in the backend environment.",
+                        "recommendations": "Verify GEMINI_API_KEY is set correctly in the backend environment.",
                         "disclaimer": "Please contact the administrator",
                     }
                 ),
@@ -226,6 +263,7 @@ Return ONLY valid JSON, no other text or markdown."""
                     "error": "LLM service error",
                     "code": "LLM_ERROR",
                     "llm_status": response.status_code,
+                    "llm_provider_status": provider_status,
                     "llm_message": provider_message,
                     "conditions": [],
                     "recommendations": "AI service temporarily unavailable",

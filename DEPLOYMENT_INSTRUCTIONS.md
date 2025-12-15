@@ -1,17 +1,15 @@
 # 🚀 Deployment Instructions - Symptom Checker
 
-## ✅ Backend Update: Switched to OpenAI LLM
+## ✅ Backend Update: Switched to Google Gemini LLM
 
-The backend now uses the **OpenAI Responses API** for faster, more reliable analysis.
+The backend now uses the **Google Gemini (Generative Language) API** for analysis.
 
 ---
 
-## 📝 Step 1: Get Your OpenAI API Key
+## 📝 Step 1: Get Your Gemini API Key
 
-1. **Go to OpenAI Dashboard**: https://platform.openai.com/api-keys
-2. **Sign in** with your OpenAI account (or create one)
-3. Click **"Create new secret key"**
-4. **Copy** the API key (it starts with `sk-...`)
+1. Create a Gemini API key from Google AI Studio / Google Cloud.
+2. Copy the key value.
 
 ---
 
@@ -23,9 +21,9 @@ The backend now uses the **OpenAI Responses API** for faster, more reliable anal
 4. Go to **"Environment"** tab (left sidebar)
 5. Click **"Add Environment Variable"**
 6. Add the following:
-   - **Key**: `OPENAI_API_KEY`
-   - **Value**: Paste your OpenAI API key (from Step 1)
-7. (Optional) Add `OPENAI_MODEL` if you want to override the default `gpt-4o-mini`
+   - **Key**: `GEMINI_API_KEY`
+   - **Value**: Paste your Gemini API key (from Step 1)
+7. (Optional) Add `GEMINI_MODEL` if you want to override the default `gemini-1.5-flash`
 8. Click **"Save Changes"**
 
 ---
@@ -45,7 +43,7 @@ The backend now uses the **OpenAI Responses API** for faster, more reliable anal
 1. **Commit the changes**:
    ```bash
    git add healthcare-backend/app.py
-   git commit -m "Switch backend to OpenAI Responses API"
+   git commit -m "Switch backend to Gemini"
    git push origin main
    ```
 2. **Render will auto-deploy** (if connected to GitHub)
@@ -69,19 +67,19 @@ The backend now uses the **OpenAI Responses API** for faster, more reliable anal
 
 ## 🎉 That's it!
 
-Your Symptom Checker should now be fully functional with OpenAI!
+Your Symptom Checker should now be fully functional with Gemini!
 
 ---
 
 ## 🆘 Troubleshooting
 
 ### If you get "API key not configured" error:
-- Make sure you added `OPENAI_API_KEY` in Render
+- Make sure you added `GEMINI_API_KEY` in Render
 - Make sure the service restarted after adding the environment variable
 
-### If you get "OpenAI API error":
-- Check if your API key is valid at https://platform.openai.com/api-keys
-- Make sure the account has sufficient quota and the selected model is available in your region
+### If you get "LLM provider error":
+- Check that your Gemini API key is valid
+- Make sure the account/project has sufficient quota and the selected model is available
 
 ### If the backend doesn't update:
 - Go to Render → Click "Manual Deploy" → "Clear build cache & deploy"
@@ -90,16 +88,16 @@ Your Symptom Checker should now be fully functional with OpenAI!
 
 ## 📊 API Considerations
 
-OpenAI Usage:
-- Rate limits depend on your OpenAI subscription tier
-- Track usage from https://platform.openai.com/usage
-- Create multiple keys for staging vs. production environments if needed
+Gemini Usage:
+- Rate limits depend on your Google AI / project quota
+- Track usage/quota in your Google console
+- Create separate keys for staging vs. production environments if needed
 
 ---
 
 ## 💡 Next Steps
 
-1. Get your OpenAI API key
+1. Get your Gemini API key
 2. Add it to Render environment variables
 3. Deploy the updated backend
 4. Test your Symptom Checker!
