@@ -9,9 +9,9 @@ config.py
 secrets.py
 venv/
 env/
+.venv/
 .DS_Store
 healthcare-backend/.env
-healthcare-backend/.env.example
 # Node.js
 node_modules/
 .next/
