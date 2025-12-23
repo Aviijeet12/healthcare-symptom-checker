@@ -1,7 +1,6 @@
 Symptom Checker
 ================================================
 
-- Demo Video Link - [https://drive.google.com/file/d/1MQCe32v8qqew1ZcJ2wRegZezT9dL4K2r/view?usp=sharing](https://drive.google.com/file/d/1MQCe32v8qqew1ZcJ2wRegZezT9dL4K2r/view?usp=sharing)
 - **Application:** [https://healthcare-symptom-checker-sooty.vercel.app/](https://healthcare-symptom-checker-sooty.vercel.app/)
 - **Backend (Render - may be inactive due to sleep mode):** [https://healthcare-symptom-checker-backend-xktt.onrender.com](https://healthcare-symptom-checker-backend-xktt.onrender.com)
 - A modern web application that helps users understand potential conditions and general recommendations based on described symptoms. The system consists of a Next.js frontend and a Python (Flask) backend that integrates with a Gemini LLM for analysis. This tool is intended for educational use only and is not a substitute for professional medical advice.
