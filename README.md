@@ -3,15 +3,15 @@ Symptom Checker
 
 - **Application:** [https://healthcare-symptom-checker-sooty.vercel.app/](https://healthcare-symptom-checker-sooty.vercel.app/)
 - **Backend (Render - may be inactive due to sleep mode):** [https://healthcare-symptom-checker-backend-xktt.onrender.com](https://healthcare-symptom-checker-backend-xktt.onrender.com)
-- A modern web application that helps users understand potential conditions and general recommendations based on described symptoms. The system consists of a Next.js frontend and a Python (Flask) backend that integrates with a Gemini LLM for analysis. This tool is intended for educational use only and is not a substitute for professional medical advice.
+- A modern web application that helps users understand potential conditions and general recommendations based on described symptoms. The system consists of a Next.js app with a backend API route that calls the Hugging Face Inference API for analysis. This tool is intended for educational use only and is not a substitute for professional medical advice.
 
 
 Overview
 ------------------------------------------------
 - Frontend: Next.js 15 (React 19, TypeScript, Tailwind CSS)
-- Backend: Python Flask with CORS
-- AI Model: Google Gemini (configurable via environment variable)
-- Deployment Targets: Vercel (frontend) and Render (backend)
+- Backend: Next.js API route (Node.js runtime)
+- AI Model: Hugging Face Inference API (configurable via environment variable)
+- Deployment Targets: Vercel (single app) or any Node-compatible host
 
 
 Monorepo Layout
@@ -22,7 +22,7 @@ Monorepo Layout
 ├─ app/                         # Next.js App Router frontend
 │  ├─ page.tsx
 │  ├─ layout.tsx
-│  └─ api/analyze/route.ts      # Frontend API route proxy to backend
+│  └─ api/analyze/route.ts      # Backend API route (calls Hugging Face)
 ├─ components/                  # UI components
 ├─ public/                      # Static assets
 ├─ styles/                      # Global styles
@@ -45,23 +45,28 @@ Prerequisites
 ------------------------------------------------
 - Node.js 18 or newer
 - pnpm (recommended) or npm/yarn
-- Python 3.10+ (for local backend runs)
 
 
 Environment Variables
 ------------------------------------------------
 
-- NEXT_PUBLIC_BACKEND_URL: Full URL to the backend analyze endpoint. Example:
-  - `https://healthcare-symptom-checker-backend-xktt.onrender.com/analyze`
+Backend (Next.js API route):
+- HF_API_KEY: Hugging Face API key (required).
+- HF_MODEL_NAME: Hugging Face model name (required), e.g. `meta-llama/Llama-3.1-8B-Instruct`.
+- HF_TEMPERATURE (optional): generation temperature.
+- HF_MAX_TOKENS (optional): max new tokens.
+- ANALYZE_TIMEOUT_MS (optional): request timeout (ms).
 
-Backend (Flask):
-- GEMINI_API_KEY: Gemini API key.
-- GEMINI_MODEL (optional): Override the default `gemini-1.5-flash` model name.
-- Place these in `healthcare-backend/.env` for local development (automatically loaded via `python-dotenv`).
+Optional caching (recommended for lower latency / reduced HF calls):
+- REDIS_URL: Redis connection URL (enables caching when set).
+- ANALYZE_CACHE_TTL_SECONDS (optional): cache TTL in seconds (default 86400).
+- ANALYZE_CACHE_ENABLED (optional): set to 0/false to disable caching.
+
+Vercel + AWS Lambda (recommended deployment):
+- ANALYZE_API_URL: API Gateway invoke URL for your Lambda (when set, Vercel `/api/analyze` proxies requests to AWS).
 
 Environment templates are provided:
 - Copy `.env.example` → `.env.local` for the frontend.
-- Copy `healthcare-backend/.env.example` → `healthcare-backend/.env` for the backend.
 
 
 Local Development
@@ -79,43 +84,78 @@ copy .env.example .env.local       # Windows
 # or
 cp .env.example .env.local         # macOS/Linux
 ```
-Edit `.env.local` so `NEXT_PUBLIC_BACKEND_URL` points to either Render or your local backend (`http://localhost:10000/analyze`).
+Edit `.env.local` and set `HF_API_KEY` and `HF_MODEL_NAME`.
 
-3) Configure backend environment
-```
-copy healthcare-backend\.env.example healthcare-backend\.env
-# or
-cp healthcare-backend/.env.example healthcare-backend/.env
-```
-Set `GEMINI_API_KEY` (and optional overrides) inside `healthcare-backend/.env`.
-
-4) Install frontend dependencies
+3) Install dependencies
 ```
 pnpm install
 ```
 
-5) Install backend dependencies (via helper script)
+Optional: Redis seeded testing (recommended for local demos)
+------------------------------------------------
+
+If your Gemini key is missing, rate-limited, or you want deterministic responses, you can use Redis seeded results.
+
+1) Start Redis (from repo root)
 ```
-pnpm backend:install
+pnpm redis:up
 ```
 
-6) Start the backend locally (new terminal)
+2) Seed Redis with test data
 ```
-pnpm backend:dev
-# Backend listens on http://localhost:10000 by default
+pnpm backend:seed
 ```
 
-7) Start the frontend dev server (another terminal)
+3) Enable seeded mode in `healthcare-backend/.env`
+```
+REDIS_SEEDED_ANALYSIS_ENABLED=1
+REDIS_URL=redis://localhost:6379/0
+REDIS_SEED_PREFIX=symptom-checker:seed
+```
+
+4) (Optional) Run the Redis seeded backend test
+```
+pnpm test:backend:redis
+```
+
+4) Start the dev server
 ```
 pnpm dev
 # App will be available at http://localhost:3000
 ```
 
 
+Optional: Redis caching for LLM responses (recommended)
+------------------------------------------------
+
+The Next.js backend route (`app/api/analyze/route.ts`) can cache successful LLM responses in Redis to reduce latency and cost.
+
+1) Start Redis (from repo root)
+```
+pnpm redis:up
+```
+
+2) Add Redis URL to `.env.local`
+```
+REDIS_URL=redis://localhost:6379/0
+ANALYZE_CACHE_TTL_SECONDS=86400
+```
+
+3) Start the app
+```
+pnpm dev
+```
+
+When enabled, responses include an `x-cache` header:
+- `HIT` for cached responses
+- `MISS` for freshly generated responses
+- `BYPASS` when caching is disabled
+
+
 Frontend to Backend Flow
 ------------------------------------------------
-- The Next.js route `app/api/analyze/route.ts` posts JSON to `NEXT_PUBLIC_BACKEND_URL`.
-- The backend endpoint `/analyze` (hosted under `healthcare-backend/`) calls the configured Gemini model and returns a structured JSON response.
+- The Next.js route `app/api/analyze/route.ts` runs on the server and calls the Hugging Face Inference API using `HF_API_KEY`.
+- The route returns a structured JSON response to the client.
 
 
 API Reference (Backend)
@@ -159,8 +199,9 @@ Backend (Render):
 
 Frontend (Vercel):
 - Import the GitHub repository in Vercel.
-- Add environment variable `NEXT_PUBLIC_BACKEND_URL` with the full Render URL ending in `/analyze`.
-- Use default build settings for Next.js 15 (no custom commands needed).
+- Add environment variables `HF_API_KEY` and `HF_MODEL_NAME` (and optional tuning vars).
+- For caching in production, also add `REDIS_URL` (managed Redis) and optional `ANALYZE_CACHE_TTL_SECONDS`.
+- Use default build settings for Next.js 15.
 - Trigger deployment and verify the app.
 
 

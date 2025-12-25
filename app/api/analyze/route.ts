@@ -1,117 +1,68 @@
-export async function POST(request: Request) {
-  try {
-    const body = await request.json()
-    const rawBackendUrl =
-      process.env.BACKEND_ANALYZE_URL ??
-      process.env.NEXT_PUBLIC_BACKEND_URL ??
-      (process.env.NODE_ENV === "production" ? null : "http://localhost:10000/analyze")
+import { analyzeSymptoms, mapErrorToHttp } from "@/lib/analyze"
 
-    if (!rawBackendUrl) {
-      return Response.json(
-        {
-          error:
-            "Backend URL is not configured. Set BACKEND_ANALYZE_URL (recommended) or NEXT_PUBLIC_BACKEND_URL to your backend /analyze endpoint.",
-          code: "MISSING_BACKEND_URL",
-        },
-        { status: 500 },
-      )
-    }
+export const runtime = "nodejs"
+// Keep within typical serverless limits.
+export const maxDuration = 60
 
-    const backendUrl = normalizeAnalyzeUrl(rawBackendUrl)
-
-    console.log("[v0] Attempting to fetch from:", backendUrl)
-
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 20000) // 20 second timeout to avoid premature 504s
-
-    try {
-      const response = await fetch(backendUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      })
-
-      clearTimeout(timeoutId)
-
-      const contentType = response.headers.get("content-type") || ""
-      const isJson = contentType.includes("application/json")
-      const responseBody = isJson ? await response.json().catch(() => null) : await response.text().catch(() => "")
-
-      if (!response.ok) {
-        return Response.json(
-          {
-            error: "Backend returned an error.",
-            code: "BACKEND_ERROR",
-            status: response.status,
-            details: responseBody,
-          },
-          { status: response.status },
-        )
-      }
-
-      return Response.json(responseBody)
-    } catch (fetchError: unknown) {
-      clearTimeout(timeoutId)
-
-      const errorName = fetchError instanceof Error ? fetchError.name : undefined
-      const errorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError)
-
-      // If backend is unreachable, provide helpful error with mock data option
-      if (errorName === "AbortError") {
-        console.error("[v0] Request timeout")
-        return Response.json(
-          {
-            error:
-              "Backend service is taking too long to respond. Please check your internet connection or try again later.",
-            code: "TIMEOUT",
-          },
-          { status: 504 },
-        )
-      }
-
-      console.error("[v0] Fetch error:", errorMessage)
-
-      // Return a more helpful error message
-      return Response.json(
-        {
-          error: "Unable to connect to the analysis service. Please ensure the backend is running and accessible.",
-          code: "CONNECTION_ERROR",
-          details: errorMessage,
-        },
-        { status: 503 },
-      )
-    }
-  } catch (error: unknown) {
-    console.error("[v0] API Error:", error)
-    return Response.json(
-      {
-        error: "Failed to process your request. Please try again.",
-        code: "PROCESSING_ERROR",
-      },
-      { status: 500 },
-    )
+function normalizeSymptoms(value: unknown): string {
+  if (typeof value === "string") return value.trim()
+  if (Array.isArray(value)) {
+    const parts = value
+      .filter((v): v is string => typeof v === "string")
+      .map((v) => v.trim())
+      .filter(Boolean)
+    return parts.join(", ")
   }
+  return ""
 }
 
-function normalizeAnalyzeUrl(value: string): string {
+function getUpstreamUrl(): string | null {
+  const raw = (process.env.ANALYZE_API_URL ?? "").trim()
+  if (!raw) return null
+  return raw
+}
+
+export async function POST(request: Request) {
+  const requestStart = Date.now()
+
   try {
-    const url = new URL(value)
-    if (url.pathname === "" || url.pathname === "/") {
-      url.pathname = "/analyze"
-      return url.toString()
+    const body = await request.json().catch(() => null)
+
+    const symptoms = normalizeSymptoms(body?.symptoms)
+    const age = typeof body?.age === "number" && Number.isFinite(body.age) ? body.age : undefined
+    const sex = typeof body?.sex === "string" ? body.sex.trim() : undefined
+    const duration = typeof body?.duration === "string" ? body.duration.trim() : undefined
+
+    const upstreamUrl = getUpstreamUrl()
+    if (upstreamUrl) {
+      const upstreamResp = await fetch(upstreamUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symptoms, age, sex, duration }),
+      })
+
+      const text = await upstreamResp.text().catch(() => "")
+      const latencyMs = Date.now() - requestStart
+      console.info(`[analyze] upstream status=${upstreamResp.status} latency=${latencyMs}ms`)
+
+      // Pass through upstream status + body (JSON or text).
+      const contentType = upstreamResp.headers.get("content-type") || "application/json"
+      return new Response(text || "{}", {
+        status: upstreamResp.status,
+        headers: { "Content-Type": contentType },
+      })
     }
 
-    if (url.pathname.endsWith("/analyze")) {
-      return url.toString()
-    }
+    const result = await analyzeSymptoms(symptoms, { age, sex, duration })
+    const latencyMs = Date.now() - requestStart
+    console.info(`[analyze] ok latency=${latencyMs}ms`)
+    return Response.json(result)
+  } catch (err: unknown) {
+    const latencyMs = Date.now() - requestStart
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(`[analyze] error latency=${latencyMs}ms message=${message}`)
 
-    url.pathname = url.pathname.endsWith("/") ? `${url.pathname}analyze` : `${url.pathname}/analyze`
-    return url.toString()
-  } catch {
-    // If it's not a full URL, leave it unchanged and let fetch fail with a useful error.
-    return value
+    const mapped = mapErrorToHttp(err)
+    return Response.json(mapped.payload, { status: mapped.statusCode })
   }
 }

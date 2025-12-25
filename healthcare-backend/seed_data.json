@@ -1,0 +1,26 @@
+[
+  {
+    "symptoms": "Fever, sore throat, cough for 2 days",
+    "result": {
+      "conditions": ["Common cold", "Seasonal flu", "Viral pharyngitis"],
+      "recommendations": "Rest, drink fluids, consider acetaminophen/ibuprofen as directed for fever/pain, and monitor symptoms. Seek urgent care for trouble breathing, chest pain, confusion, dehydration, or persistent high fever. Consider a COVID/flu test if available.",
+      "disclaimer": "Educational use only. Not medical advice. Consult a licensed clinician for diagnosis and treatment."
+    }
+  },
+  {
+    "symptoms": "Burning while urinating and frequent urination",
+    "result": {
+      "conditions": ["Urinary tract infection (UTI)", "Irritation/dehydration", "Sexually transmitted infection (possible)"],
+      "recommendations": "Hydrate and consider contacting a clinician for evaluation and urine testing. Seek urgent care for fever, flank/back pain, vomiting, pregnancy, or worsening symptoms.",
+      "disclaimer": "Educational use only. Not medical advice. A clinician can confirm the cause and prescribe treatment if needed."
+    }
+  },
+  {
+    "symptoms": "Sudden severe headache with vision changes",
+    "result": {
+      "conditions": ["Emergency warning sign"],
+      "recommendations": "This can be a medical emergency. Seek urgent/emergency care immediately, especially if the headache is the worst of your life, sudden onset, accompanied by weakness, speech trouble, confusion, or fainting.",
+      "disclaimer": "Educational use only. Not a diagnosis. Please seek emergency medical evaluation now."
+    }
+  }
+]

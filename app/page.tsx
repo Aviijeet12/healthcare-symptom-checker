@@ -13,15 +13,22 @@ interface AnalysisResult {
   disclaimer: string
 }
 
+type ApiErrorState = {
+  message: string
+  code?: string
+}
+
 export default function Home() {
   const [results, setResults] = useState<AnalysisResult | null>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<ApiErrorState | null>(null)
+  const [lastSymptoms, setLastSymptoms] = useState<string | null>(null)
 
   const handleAnalyzeSymptoms = async (symptoms: string) => {
     setLoading(true)
     setError(null)
     setResults(null)
+    setLastSymptoms(symptoms)
 
     try {
       const response = await fetch("/api/analyze", {
@@ -32,23 +39,52 @@ export default function Home() {
         body: JSON.stringify({ symptoms }),
       })
 
-      const data = await response.json()
+      const rawText = await response.text().catch(() => "")
+      const data = (() => {
+        if (!rawText) return null
+        try {
+          return JSON.parse(rawText)
+        } catch {
+          return null
+        }
+      })()
 
       if (!response.ok) {
-        const errorMessage = data.error || "Failed to analyze symptoms"
-        setError(errorMessage)
-        console.error("[v0] API Error:", data)
+        const errorMessage = (data && typeof data === "object" && "error" in data && typeof data.error === "string"
+          ? data.error
+          : rawText?.trim()
+            ? rawText.trim()
+            : "Failed to analyze symptoms")
+        const errorCode = (data && typeof data === "object" && "code" in data && typeof data.code === "string" ? data.code : undefined)
+        setError({ message: errorMessage, code: errorCode })
+        console.error("[v0] API Error:", { status: response.status, data, rawText })
+        return
+      }
+
+      if (!data) {
+        setError({ message: "Unexpected server response. Please try again.", code: "BAD_RESPONSE" })
+        console.error("[v0] API Error:", { status: response.status, data, rawText })
         return
       }
 
       setResults(data)
     } catch (err) {
-      setError("Network error: Unable to reach the server. Please check your internet connection and try again.")
+      setError({
+        message: "Network error: Unable to reach the server. Please check your internet connection and try again.",
+        code: "NETWORK_ERROR",
+      })
       console.error("[v0] Error:", err)
     } finally {
       setLoading(false)
     }
   }
+
+  const canRetry = Boolean(
+    !loading &&
+      lastSymptoms &&
+      error &&
+      (error.code === "TIMEOUT" || error.code === "CONNECTION_ERROR" || error.code === "NETWORK_ERROR"),
+  )
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-950 via-slate-900 to-black dark">
@@ -86,7 +122,21 @@ export default function Home() {
               <div className="mt-6 p-4 bg-red-950/50 border border-red-800 rounded-xl animate-in fade-in slide-in-from-top-2">
                 <div className="flex gap-3">
                   <span className="text-xl">⚠️</span>
-                  <p className="text-red-300 text-sm">{error}</p>
+                  <div className="flex-1">
+                    <p className="text-red-300 text-sm">{error.message}</p>
+                    {canRetry && (
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={() => lastSymptoms && handleAnalyzeSymptoms(lastSymptoms)}
+                          disabled={loading}
+                          className="inline-flex items-center justify-center rounded-lg border border-red-700 bg-slate-900/40 px-3 py-2 text-sm font-semibold text-red-200 hover:bg-slate-900/70 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

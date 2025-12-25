@@ -9,8 +9,12 @@
     "start": "next start",
     "backend:install": "node scripts/backend-python.mjs -m pip install -r requirements.txt",
     "backend:dev": "node scripts/backend-python.mjs app.py",
+    "backend:seed": "node scripts/backend-python.mjs seed_redis.py",
     "test:backend": "node scripts/backend-python.mjs tests/smoke_test.py",
+    "test:backend:redis": "node scripts/backend-python.mjs tests/redis_seed_test.py",
     "lint:backend": "node scripts/backend-python.mjs -m ruff check .",
+    "redis:up": "docker compose up -d redis",
+    "redis:down": "docker compose down",
     "check:all": "pnpm lint && pnpm lint:backend && pnpm test:backend"
   },
   "dependencies": {
@@ -59,6 +63,7 @@
     "react-hook-form": "^7.60.0",
     "react-resizable-panels": "^2.1.7",
     "recharts": "2.15.4",
+    "redis": "^4.7.1",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",

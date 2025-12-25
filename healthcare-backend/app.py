@@ -12,6 +12,7 @@ import os
 import time
 from pathlib import Path
 from urllib.parse import urlencode
+import hashlib
 
 import requests
 from dotenv import load_dotenv
@@ -25,16 +26,18 @@ load_dotenv(BASE_DIR / ".env")
 app = Flask(__name__)
 CORS(app)
 
-# Gemini API configuration
-_raw_gemini_key = os.getenv("GEMINI_API_KEY")
-GEMINI_API_KEY = _raw_gemini_key.strip() if isinstance(_raw_gemini_key, str) else None
+def _env_str(name: str, default: str | None = None) -> str | None:
+    value = os.getenv(name, default)
+    if isinstance(value, str):
+        return value.strip()
+    return default
 
-_raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-GEMINI_MODEL = _raw_gemini_model.strip() if isinstance(_raw_gemini_model, str) else "gemini-1.5-flash"
+
+# Gemini API configuration
+GEMINI_MODEL = _env_str("GEMINI_MODEL", "gemini-1.5-flash") or "gemini-1.5-flash"
 
 # Prefer v1 (newer). We'll also fall back to v1beta automatically when needed.
-_raw_base_url = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com/v1")
-GEMINI_API_BASE_URL = _raw_base_url.strip() if isinstance(_raw_base_url, str) else "https://generativelanguage.googleapis.com/v1"
+GEMINI_API_BASE_URL = _env_str("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com/v1") or "https://generativelanguage.googleapis.com/v1"
 
 # When enabled, the backend will return a safe, educational fallback response when
 # the LLM provider is unavailable/rate-limited, instead of failing the request.
@@ -47,8 +50,248 @@ RETURN_FALLBACK_ON_LLM_ERROR = os.getenv("RETURN_FALLBACK_ON_LLM_ERROR", "1").lo
 }
 
 
+# Hugging Face Inference Providers (OpenAI-compatible) configuration
+# Note: api-inference.huggingface.co has been deprecated in favor of router.huggingface.co
+HF_ROUTER_BASE_URL = _env_str("HF_BASE_URL", "https://router.huggingface.co/v1") or "https://router.huggingface.co/v1"
+
+
+def _env_float(name: str, default: float) -> float:
+    value = _env_str(name)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+        if not (parsed == parsed):  # NaN
+            return default
+        return parsed
+    except Exception:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = _env_str(name)
+    if value is None:
+        return default
+    try:
+        return int(float(value))
+    except Exception:
+        return default
+
+
+def _hf_chat_url(base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/chat/completions"
+
+
+def _post_hf(payload: dict, *, base_url: str, api_key: str, timeout_s: float) -> requests.Response:
+    return requests.post(
+        _hf_chat_url(base_url),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=timeout_s,
+    )
+
+
+def _parse_retry_after_seconds(response: requests.Response) -> float | None:
+    value = response.headers.get("retry-after")
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+        if seconds < 0:
+            return None
+        return seconds
+    except Exception:
+        return None
+
+
+def _extract_hf_error(response_json: object) -> tuple[str | None, float | None]:
+    if not isinstance(response_json, dict):
+        return None, None
+    message = response_json.get("error") if isinstance(response_json.get("error"), str) else None
+    estimated = response_json.get("estimated_time") if isinstance(response_json.get("estimated_time"), (int, float)) else None
+    try:
+        estimated_seconds = float(estimated) if estimated is not None else None
+    except Exception:
+        estimated_seconds = None
+    return message, estimated_seconds
+
+
+def _extract_hf_text(response_json: object) -> str:
+    # OpenAI-compatible router response: {"choices": [{"message": {"content": "..."}}]}
+    if isinstance(response_json, dict):
+        choices = response_json.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0]
+            if isinstance(first, dict):
+                message = first.get("message")
+                if isinstance(message, dict) and isinstance(message.get("content"), str):
+                    return message["content"]
+    raise ValueError("Unexpected Hugging Face router response format")
+
+
+def _post_hf_with_resilience(
+    payload: dict,
+    *,
+    base_url: str,
+    api_key: str,
+    timeout_s: float,
+) -> requests.Response:
+    """Call Hugging Face Inference API with retries, rate-limit backoff, and model-loading polling."""
+
+    max_retries = max(0, min(_env_int("HF_MAX_RETRIES", 3), 6))
+    min_backoff_s = max(0.1, min(_env_float("HF_MIN_BACKOFF_S", 0.4), 10.0))
+    max_backoff_s = max(0.5, min(_env_float("HF_MAX_BACKOFF_S", 8.0), 60.0))
+    wait_for_model_max_ms = max(0, min(_env_int("HF_WAIT_FOR_MODEL_MAX_MS", 25000), 120000))
+
+    def backoff(attempt: int) -> float:
+        exp = min_backoff_s * (2 ** max(0, attempt - 1))
+        jitter = 0.75 + (0.5 * (time.time() % 1))
+        return min(max_backoff_s, exp * jitter)
+
+    started = time.time()
+    attempt = 0
+    while True:
+        attempt += 1
+        t0 = time.time()
+        resp = _post_hf(payload, base_url=base_url, api_key=api_key, timeout_s=timeout_s)
+        latency_ms = int((time.time() - t0) * 1000)
+
+        # Parse JSON for error handling when possible.
+        resp_json: object | None = None
+        try:
+            if resp.headers.get("content-type", "").startswith("application/json"):
+                resp_json = resp.json()
+        except Exception:
+            resp_json = None
+
+        if resp.status_code == 401:
+            raise PermissionError("Unauthorized: invalid HF_API_KEY")
+
+        if resp.status_code == 403:
+            raise PermissionError(
+                "Forbidden: token may not have access to this model (gated/private) or lacks inference permissions"
+            )
+
+        if resp.status_code == 429:
+            retry_after = _parse_retry_after_seconds(resp)
+            if attempt > max_retries + 1:
+                return resp
+            delay = retry_after if retry_after is not None else backoff(attempt)
+            print(f"[hf] 429 rate-limited (latency={latency_ms}ms) retry_in={delay:.2f}s attempt={attempt}")
+            time.sleep(delay)
+            continue
+
+        # Model loading: often 503 with {error: 'loading', estimated_time: ...}
+        if resp.status_code == 503 and wait_for_model_max_ms > 0 and resp_json is not None:
+            message, estimated_s = _extract_hf_error(resp_json)
+            if message and "loading" in message.lower():
+                elapsed_ms = int((time.time() - started) * 1000)
+                remaining_ms = wait_for_model_max_ms - elapsed_ms
+                if remaining_ms <= 0:
+                    return resp
+
+                suggested_ms = int((estimated_s or 1.2) * 1000)
+                delay_ms = max(400, min(6000, min(suggested_ms, remaining_ms)))
+                print(f"[hf] model loading; polling again in {delay_ms}ms (elapsed={elapsed_ms}ms)")
+                time.sleep(delay_ms / 1000.0)
+                continue
+
+        # Retry transient upstream errors.
+        if resp.status_code in (500, 502, 503, 504) and attempt <= max_retries:
+            delay = backoff(attempt)
+            print(f"[hf] upstream {resp.status_code} (latency={latency_ms}ms) retry_in={delay:.2f}s attempt={attempt}")
+            time.sleep(delay)
+            continue
+
+        return resp
+
+
+def _parse_llm_json_output(text: str) -> dict:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        raise ValueError("Empty model output")
+
+    if "```json" in cleaned:
+        json_str = cleaned.split("```json", 1)[1].split("```", 1)[0].strip()
+        return json.loads(json_str)
+    if "```" in cleaned:
+        json_str = cleaned.split("```", 1)[1].split("```", 1)[0].strip()
+        return json.loads(json_str)
+
+    # Try to extract first JSON object if extra text slips through.
+    if "{" in cleaned and "}" in cleaned:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                return json.loads(cleaned[start : end + 1])
+            except Exception:
+                pass
+
+    return json.loads(cleaned)
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _normalize_symptoms(text: str) -> str:
+    return " ".join((text or "").strip().lower().split())
+
+
+def _redis_seed_key(prefix: str, symptoms: str) -> str:
+    normalized = _normalize_symptoms(symptoms)
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"{prefix}:{digest}"
+
+
+def _try_get_seeded_result(symptoms: str) -> dict | None:
+    if not _env_bool("REDIS_SEEDED_ANALYSIS_ENABLED", False):
+        return None
+
+    redis_url = _env_str("REDIS_URL", "redis://localhost:6379/0") or "redis://localhost:6379/0"
+    prefix = _env_str("REDIS_SEED_PREFIX", "symptom-checker:seed") or "symptom-checker:seed"
+
+    try:
+        import redis  # type: ignore
+    except Exception:
+        # Redis isn't available in the environment; treat as no seed.
+        return None
+
+    try:
+        client = redis.Redis.from_url(redis_url, decode_responses=True)
+        raw = client.get(_redis_seed_key(prefix, symptoms))
+        if not raw:
+            return None
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            return None
+        if not isinstance(parsed.get("conditions"), list):
+            return None
+        if not isinstance(parsed.get("recommendations"), str):
+            return None
+        if not isinstance(parsed.get("disclaimer"), str):
+            return None
+        return {
+            "conditions": parsed["conditions"],
+            "recommendations": parsed["recommendations"],
+            "disclaimer": parsed["disclaimer"],
+        }
+    except Exception:
+        return None
+
+
 def _fallback_result(reason: str) -> dict:
     return {
+        "error": "AI analysis temporarily unavailable",
+        "code": "LLM_FALLBACK",
+        "reason": reason,
         "conditions": ["AI analysis temporarily unavailable"],
         "recommendations": (
             "We couldn't run the AI analysis right now (service is busy). "
@@ -64,10 +307,12 @@ def _fallback_result(reason: str) -> dict:
 
 
 def _gemini_generate_url(model: str | None = None, base_url: str | None = None) -> str:
-    base = (base_url or GEMINI_API_BASE_URL).rstrip("/")
-    effective_model = (model or GEMINI_MODEL).strip()
+    # Re-read from env to support local .env edits without a restart.
+    base = (base_url or _env_str("GEMINI_API_BASE_URL", GEMINI_API_BASE_URL) or GEMINI_API_BASE_URL).rstrip("/")
+    effective_model = (model or _env_str("GEMINI_MODEL", GEMINI_MODEL) or GEMINI_MODEL).strip()
+    api_key = _env_str("GEMINI_API_KEY", "") or ""
     path = f"/models/{effective_model}:generateContent"
-    return f"{base}{path}?{urlencode({'key': GEMINI_API_KEY or ''})}"
+    return f"{base}{path}?{urlencode({'key': api_key})}"
 
 
 def _post_gemini(payload: dict, model: str | None = None, base_url: str | None = None) -> requests.Response:
@@ -215,6 +460,10 @@ def home():
 @app.route("/analyze", methods=["POST"])
 def analyze_symptoms():
     try:
+        # Reload local backend env on each request so edits to healthcare-backend/.env
+        # are picked up without requiring a manual restart.
+        load_dotenv(BASE_DIR / ".env", override=True)
+
         # Use silent=True so malformed JSON or missing content-type returns None
         # instead of raising a BadRequest exception.
         data = request.get_json(silent=True)
@@ -226,11 +475,136 @@ def analyze_symptoms():
         if not symptoms:
             return jsonify({"error": "No symptoms provided"}), 400
 
-        if not GEMINI_API_KEY:
+        seeded = _try_get_seeded_result(symptoms)
+        if seeded is not None:
+            return jsonify(seeded)
+
+        hf_key = _env_str("HF_API_KEY")
+        hf_model = _env_str("HF_MODEL_NAME")
+
+        # Prefer Hugging Face when configured.
+        if hf_key and hf_model:
+            temperature = max(0.0, min(_env_float("HF_TEMPERATURE", 0.2), 2.0))
+            max_tokens = max(1, min(_env_int("HF_MAX_TOKENS", 512), 2048))
+            timeout_ms = max(3000, min(_env_int("ANALYZE_TIMEOUT_MS", 30000), 60000))
+            timeout_s = timeout_ms / 1000.0
+            hf_base_url = _env_str("HF_BASE_URL", HF_ROUTER_BASE_URL) or HF_ROUTER_BASE_URL
+
+            prompt = f"""Analyze these symptoms for educational purposes only: \"{symptoms}\"\n\nProvide a structured response with:\n1. 2-3 possible conditions (common, non-emergency)\n2. Recommended next steps (general advice)\n3. Important disclaimer about consulting medical professionals\n\nFormat the response as valid JSON with these exact keys:\n- \"conditions\" (array of strings)\n- \"recommendations\" (string)\n- \"disclaimer\" (string)\n\nKeep it educational, non-alarming, and emphasize this is not medical diagnosis.\n\nReturn ONLY valid JSON, no other text or markdown."""
+
+            hf_payload = {
+                "model": hf_model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "You are an empathetic medical information assistant. "
+                            "Provide educational, non-emergency guidance only and remind users to consult licensed clinicians.\n\n"
+                            + prompt
+                        ),
+                    }
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False,
+            }
+
+            t0 = time.time()
+            try:
+                resp = _post_hf_with_resilience(hf_payload, base_url=hf_base_url, api_key=hf_key, timeout_s=timeout_s)
+            except PermissionError as exc:
+                return (
+                    jsonify(
+                        {
+                            "error": "LLM provider authentication failed. Backend is not configured correctly.",
+                            "code": "LLM_AUTH_ERROR",
+                            "llm_status": 401,
+                            "llm_message": str(exc),
+                            "conditions": [],
+                            "recommendations": "Verify HF_API_KEY and HF_MODEL_NAME are set and the token can access the model.",
+                            "disclaimer": "Please contact the administrator",
+                        }
+                    ),
+                    500,
+                )
+
+            latency_ms = int((time.time() - t0) * 1000)
+            print(f"[hf] /analyze model={hf_model} status={resp.status_code} latency={latency_ms}ms")
+
+            if resp.status_code == 200:
+                response_json = resp.json()
+                hf_text = _extract_hf_text(response_json)
+                try:
+                    result = _parse_llm_json_output(hf_text)
+                except Exception:
+                    result = {
+                        "conditions": ["Consult a medical professional"],
+                        "recommendations": "Based on your symptoms, consult a doctor for proper medical advice.",
+                        "disclaimer": "Educational purposes only - not medical advice",
+                    }
+                return jsonify(result)
+
+            # Provider-side errors mapped to stable responses.
+            if resp.status_code == 429:
+                if RETURN_FALLBACK_ON_LLM_ERROR:
+                    return jsonify(_fallback_result("AI provider rate limit")), 503
+                return (
+                    jsonify(
+                        {
+                            "error": "LLM provider rate limit. Please try again later.",
+                            "code": "LLM_RATE_LIMIT",
+                            "llm_status": 429,
+                            "conditions": [],
+                            "recommendations": "Try again in a few minutes.",
+                            "disclaimer": "Please try again later",
+                        }
+                    ),
+                    503,
+                )
+
+            if resp.status_code in (401, 403):
+                return (
+                    jsonify(
+                        {
+                            "error": "LLM provider authentication failed. Backend is not configured correctly.",
+                            "code": "LLM_AUTH_ERROR",
+                            "llm_status": resp.status_code,
+                            "conditions": [],
+                            "recommendations": "Verify HF_API_KEY is correct and the token can access HF_MODEL_NAME.",
+                            "disclaimer": "Please contact the administrator",
+                        }
+                    ),
+                    500,
+                )
+
+            if RETURN_FALLBACK_ON_LLM_ERROR:
+                return jsonify(_fallback_result(f"AI provider error {resp.status_code}")), 503
+
             return (
                 jsonify(
                     {
-                        "error": "Gemini API key not configured",
+                        "error": "LLM service error",
+                        "code": "LLM_ERROR",
+                        "llm_status": resp.status_code,
+                        "conditions": [],
+                        "recommendations": "AI service temporarily unavailable",
+                        "disclaimer": "Please try again later",
+                    }
+                ),
+                503,
+            )
+
+        # If HF is not configured, fall back to Gemini (legacy).
+        gemini_key = _env_str("GEMINI_API_KEY")
+        if not gemini_key:
+            if RETURN_FALLBACK_ON_LLM_ERROR:
+                return jsonify(_fallback_result("AI provider not configured (missing HF_API_KEY/HF_MODEL_NAME)")), 500
+
+            return (
+                jsonify(
+                    {
+                        "error": "LLM provider not configured",
+                        "code": "LLM_NOT_CONFIGURED",
                         "conditions": [],
                         "recommendations": "Service configuration error",
                         "disclaimer": "Please contact administrator",
@@ -329,7 +703,7 @@ Return ONLY valid JSON, no other text or markdown."""
 
         if response.status_code == 429:
             if RETURN_FALLBACK_ON_LLM_ERROR:
-                return jsonify(_fallback_result("AI provider rate limit or quota exceeded"))
+                return jsonify(_fallback_result("AI provider rate limit or quota exceeded")), 503
 
             return (
                 jsonify(
@@ -365,7 +739,7 @@ Return ONLY valid JSON, no other text or markdown."""
             )
 
         if RETURN_FALLBACK_ON_LLM_ERROR:
-            return jsonify(_fallback_result(f"AI provider error {response.status_code}"))
+            return jsonify(_fallback_result(f"AI provider error {response.status_code}")), 503
 
         return (
             jsonify(

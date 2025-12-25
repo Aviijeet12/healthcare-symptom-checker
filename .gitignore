@@ -16,3 +16,12 @@ healthcare-backend/.env
 node_modules/
 .next/
 .pnpm-store/
+
+# Local logs
+next-dev.stdout.log
+next-dev.stderr.log
+
+# Lambda build artifacts (generated locally)
+lambda-build/
+lambda-backend.zip
+lambda-backend-posix.zip
