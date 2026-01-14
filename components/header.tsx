@@ -34,7 +34,7 @@ export default function Header() {
 
           <div className="flex items-center gap-2 px-4 py-2 bg-green-950 rounded-full border border-green-800">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-xs font-semibold text-green-400">LLM-OpenAI ACTIVE</span>
+            <span className="text-xs font-semibold text-green-400">LLM ACTIVE</span>
           </div>
         </div>
       </div>
