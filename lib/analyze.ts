@@ -1,10 +1,16 @@
 import crypto from "crypto"
 
 import { HFError, generateHFResponse } from "./huggingface"
+import { getAnalysisCache, normalizeSymptomKey } from "./mem-cache"
 import { redisGetJson, redisSetJson } from "./redis"
 
+export type Condition = {
+  name: string
+  description: string
+}
+
 export type AnalysisResult = {
-  conditions: string[]
+  conditions: Condition[]
   recommendations: string
   disclaimer: string
 }
@@ -80,13 +86,21 @@ function buildSymptomAnalysisPrompt(symptoms: string): string {
   return [
     "You are a cautious health education assistant.",
     "Task: Given the user's symptom description, return ONLY a valid JSON object with EXACTLY these keys:",
-    "- conditions: array of 2 to 5 short possible conditions (strings)",
-    "- recommendations: a single concise paragraph (string)",
-    "- disclaimer: a single sentence stating this is educational only and not medical advice (string)",
+    "",
+    "- conditions: array of EXACTLY 5 objects, each with:",
+    '  - "name": short condition name (max 5 words)',
+    '  - "description": 1-2 sentence educational explanation of the condition, what causes it, and how it relates to the symptoms',
+    "- recommendations: a clear, actionable paragraph (2-4 sentences) with specific steps the user should take, such as rest, hydration, OTC medication, or when to see a doctor",
+    "- disclaimer: ONE sentence stating this is educational only (max 20 words)",
+    "",
     "Rules:",
-    "- Output MUST be JSON only (no markdown, no code fences, no extra text).",
+    "- Output MUST be valid JSON only — no markdown, no code fences, no extra text before or after.",
+    "- You MUST return EXACTLY 5 conditions, no more, no less.",
+    "- Keep the ENTIRE response under 600 tokens.",
     "- Do not include any additional keys.",
-    "- Be conservative: avoid diagnosis certainty.",
+    "- Be conservative: avoid diagnosis certainty. Use words like 'possible' or 'may'.",
+    "- Recommendations should be practical and specific to the symptoms described.",
+    "",
     "User symptoms:",
     symptoms,
   ].join("\n")
@@ -100,6 +114,24 @@ function safeJsonParse(value: string): unknown {
   }
 }
 
+function stripMarkdownFences(value: string): string {
+  // Remove ```json ... ``` or ``` ... ``` wrappers
+  let cleaned = value.trim()
+  cleaned = cleaned.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/, "")
+  return cleaned.trim()
+}
+
+function fixCommonJsonIssues(value: string): string {
+  // Remove trailing commas before } or ]
+  let fixed = value.replace(/,\s*([}\]])/g, "$1")
+  // Replace single-quoted strings with double-quoted (simple heuristic)
+  // Only if there are no double quotes at all (to avoid breaking valid JSON)
+  if (!fixed.includes('"') && fixed.includes("'")) {
+    fixed = fixed.replace(/'/g, '"')
+  }
+  return fixed
+}
+
 function extractFirstJsonObject(value: string): string | null {
   const start = value.indexOf("{")
   const end = value.lastIndexOf("}")
@@ -107,37 +139,192 @@ function extractFirstJsonObject(value: string): string | null {
   return value.slice(start, end + 1)
 }
 
+/**
+ * Attempt to recover a truncated JSON object from an LLM response.
+ * The model sometimes runs out of tokens mid-sentence, producing something like:
+ *   {"conditions":["A","B"],"recommendations":"Do X and stay hydr
+ * We try to close open strings/arrays/objects to salvage what we can.
+ */
+function tryRecoverTruncatedJson(value: string): string | null {
+  const start = value.indexOf("{")
+  if (start < 0) return null
+  let text = value.slice(start)
+
+  // If it already ends with }, it's not truncated in this way
+  if (text.trimEnd().endsWith("}")) return null
+
+  // Close any open string
+  const quoteCount = (text.match(/(?<!\\)"/g) || []).length
+  if (quoteCount % 2 !== 0) {
+    text += '"'
+  }
+
+  // Close open arrays and objects
+  const opens = (text.match(/[{[]/g) || []).length
+  const closes = (text.match(/[}\]]/g) || []).length
+  // Remove any trailing comma
+  text = text.replace(/,\s*$/, "")
+  for (let i = 0; i < opens - closes; i++) {
+    // Decide whether to close ] or } based on what was opened
+    const lastOpen = text.lastIndexOf("[")
+    const lastClose = text.lastIndexOf("]")
+    if (lastOpen > lastClose) {
+      text += "]"
+    } else {
+      text += "}"
+    }
+  }
+
+  return text
+}
+
+function normalizeCondition(c: unknown): Condition | null {
+  if (typeof c === "string" && c.trim()) {
+    return { name: c.trim(), description: "" }
+  }
+  if (c && typeof c === "object") {
+    const rec = c as Record<string, unknown>
+    const name = typeof rec.name === "string" ? rec.name.trim() : typeof rec.condition === "string" ? rec.condition.trim() : ""
+    const description = typeof rec.description === "string" ? rec.description.trim() : typeof rec.info === "string" ? rec.info.trim() : typeof rec.details === "string" ? rec.details.trim() : ""
+    if (name) return { name, description }
+  }
+  return null
+}
+
 export function validateAnalysisResult(value: unknown): AnalysisResult | null {
   if (!value || typeof value !== "object") return null
   const record = value as Record<string, unknown>
 
-  const conditions = record.conditions
+  const rawConditions = record.conditions
   const recommendations = record.recommendations
   const disclaimer = record.disclaimer
 
-  if (!Array.isArray(conditions) || !conditions.every((c) => typeof c === "string" && c.trim())) return null
+  if (!Array.isArray(rawConditions) || rawConditions.length === 0) return null
   if (typeof recommendations !== "string" || !recommendations.trim()) return null
   if (typeof disclaimer !== "string" || !disclaimer.trim()) return null
 
+  const conditions = rawConditions.map(normalizeCondition).filter((c): c is Condition => c !== null).slice(0, 6)
+  if (conditions.length === 0) return null
+
   return {
-    conditions: conditions.map((c) => c.trim()).slice(0, 5),
+    conditions,
     recommendations: recommendations.trim(),
     disclaimer: disclaimer.trim(),
   }
 }
 
+function coerceToAnalysisResult(value: unknown): AnalysisResult | null {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+
+  // Common near-misses from LLMs:
+  // - conditions is a single string with comma/newline separated items
+  // - recommendations is an array of strings
+  // - disclaimer missing or empty
+  // - slightly different key names
+  const rawConditions =
+    record.conditions ??
+    record.possible_conditions ??
+    record.possibleConditions ??
+    record.differentials ??
+    record.differential ??
+    record.condition ??
+    record.conditions_list
+
+  const rawRecommendations = record.recommendations ?? record.recommendation ?? record.advice
+  const rawDisclaimer = record.disclaimer ?? record.disclaimer_text ?? record.disclaimerText
+
+  const normalizeConditionText = (text: string) => text.replace(/^[-*\u2022\s]+/, "").trim()
+
+  let conditions: Condition[] = []
+  if (Array.isArray(rawConditions)) {
+    conditions = rawConditions
+      .map(normalizeCondition)
+      .filter((c): c is Condition => c !== null)
+  } else if (typeof rawConditions === "string") {
+    conditions = rawConditions
+      .split(/[\n,;]+/)
+      .map((c) => normalizeConditionText(c))
+      .filter(Boolean)
+      .map((name) => ({ name, description: "" }))
+  }
+
+  let recommendations = ""
+  if (typeof rawRecommendations === "string") {
+    recommendations = rawRecommendations.trim()
+  } else if (Array.isArray(rawRecommendations)) {
+    recommendations = rawRecommendations
+      .map((r) => (typeof r === "string" ? r.trim() : r == null ? "" : String(r).trim()))
+      .filter(Boolean)
+      .join(" ")
+      .trim()
+  }
+
+  let disclaimer = ""
+  if (typeof rawDisclaimer === "string") {
+    disclaimer = rawDisclaimer.trim()
+  }
+
+  if (!disclaimer) {
+    disclaimer = "Educational purposes only. Not medical advice. Consult a qualified professional."
+  }
+
+  if (!conditions.length || !recommendations) return null
+
+  return {
+    conditions: conditions.slice(0, 6),
+    recommendations,
+    disclaimer,
+  }
+}
+
+
 function parseAnalysisJson(text: string): AnalysisResult | null {
   const raw = (text || "").trim()
   if (!raw) return null
 
+  // Try raw text as-is
   const direct = safeJsonParse(raw)
   const validated = validateAnalysisResult(direct)
   if (validated) return validated
 
-  const extracted = extractFirstJsonObject(raw)
-  if (!extracted) return null
-  const parsed = safeJsonParse(extracted)
-  return validateAnalysisResult(parsed)
+  const coercedDirect = coerceToAnalysisResult(direct)
+  if (coercedDirect) return coercedDirect
+
+  // Strip markdown fences and try again
+  const stripped = stripMarkdownFences(raw)
+  if (stripped !== raw) {
+    const strippedParsed = safeJsonParse(stripped)
+    const strippedValidated = validateAnalysisResult(strippedParsed) ?? coerceToAnalysisResult(strippedParsed)
+    if (strippedValidated) return strippedValidated
+  }
+
+  // Extract first JSON object from surrounding text
+  const textToParse = stripped || raw
+  const extracted = extractFirstJsonObject(textToParse)
+  if (extracted) {
+    const parsed = safeJsonParse(extracted)
+    const result = validateAnalysisResult(parsed) ?? coerceToAnalysisResult(parsed)
+    if (result) return result
+
+    // Fix common LLM JSON issues (trailing commas, etc) and retry
+    const fixed = fixCommonJsonIssues(extracted)
+    if (fixed !== extracted) {
+      const fixedParsed = safeJsonParse(fixed)
+      const fixedResult = validateAnalysisResult(fixedParsed) ?? coerceToAnalysisResult(fixedParsed)
+      if (fixedResult) return fixedResult
+    }
+  }
+
+  // Last resort: try to recover truncated JSON (model ran out of tokens)
+  const recovered = tryRecoverTruncatedJson(textToParse)
+  if (recovered) {
+    const recoveredParsed = safeJsonParse(recovered)
+    const recoveredResult = validateAnalysisResult(recoveredParsed) ?? coerceToAnalysisResult(recoveredParsed)
+    if (recoveredResult) return recoveredResult
+  }
+
+  return null
 }
 
 export async function analyzeSymptoms(symptoms: string, opts: AnalysisOptions = {}): Promise<AnalysisResult> {
@@ -150,7 +337,10 @@ export async function analyzeSymptoms(symptoms: string, opts: AnalysisOptions = 
     throw new AnalysisError("Server is missing HF_API_KEY.", "SERVER_MISCONFIGURED")
   }
 
-  if (!process.env.HF_MODEL_NAME || !process.env.HF_MODEL_NAME.trim()) {
+  const primaryModel = (process.env.HF_MODEL_NAME ?? "").trim()
+  const fallbackModel = (process.env.HF_FALLBACK_MODEL_NAME ?? "").trim()
+
+  if (!primaryModel && !fallbackModel) {
     throw new AnalysisError("Server is missing HF_MODEL_NAME.", "SERVER_MISCONFIGURED")
   }
 
@@ -167,40 +357,100 @@ export async function analyzeSymptoms(symptoms: string, opts: AnalysisOptions = 
         age: opts.age,
         sex: opts.sex,
         duration: opts.duration,
-        model: process.env.HF_MODEL_NAME,
+        model: primaryModel || fallbackModel,
         temperature: typeof temperature === "number" ? temperature : undefined,
         maxTokens: typeof maxTokens === "number" ? maxTokens : undefined,
       })
     : null
 
+  // ── In-memory cache (sub-millisecond) ──────────────────────────
+  const memCache = getAnalysisCache()
+  const memKey = normalizeSymptomKey(cleanedSymptoms)
+
+  const memHit = memCache.get(memKey) as AnalysisResult | undefined
+  if (memHit) {
+    console.info(`[analyze] memory cache HIT (key=${memKey.slice(0, 40)}…)`)
+    return memHit
+  }
+
+  // ── Redis cache (optional) ─────────────────────────────────────
   if (cacheKey) {
     const cached = await redisGetJson<AnalysisResult>(cacheKey)
     const validated = validateAnalysisResult(cached)
     if (validated) {
+      // Promote to memory cache for next time
+      memCache.set(memKey, validated)
       return validated
     }
   }
 
   const prompt = buildSymptomAnalysisPrompt(cleanedSymptoms)
 
-  const result = await generateHFResponse(prompt, {
+  const genConfig = {
     temperature: typeof temperature === "number" ? temperature : undefined,
     maxTokens: typeof maxTokens === "number" ? maxTokens : undefined,
     timeoutMs: typeof timeoutMs === "number" ? timeoutMs : undefined,
-  })
-
-  const parsed = parseAnalysisJson(result.text)
-  if (!parsed) {
-    throw new AnalysisError("AI returned an unexpected format.", "BAD_LLM_OUTPUT")
   }
 
-  if (cacheKey) {
-    await redisSetJson(cacheKey, parsed, {
-      ttlSeconds: typeof cacheTtlSeconds === "number" ? cacheTtlSeconds : 24 * 60 * 60,
-    })
+  // Fast path: try primary model with reduced retries for speed
+  const modelsToTry = primaryModel
+    ? fallbackModel
+      ? [primaryModel, fallbackModel]
+      : [primaryModel]
+    : [fallbackModel]
+
+  let lastError: unknown = null
+
+  for (const model of modelsToTry) {
+    const isPrimary = model === modelsToTry[0]
+    const isFallback = !isPrimary
+
+    try {
+      const result = await generateHFResponse(prompt, {
+        ...genConfig,
+        model,
+        // Primary: only 1 retry for speed. Fallback: full 3 retries for reliability.
+        maxRetries: isPrimary && modelsToTry.length > 1 ? 1 : 3,
+      })
+
+      let parsed = parseAnalysisJson(result.text)
+
+      if (!parsed) {
+        console.warn(`[analyze] bad output from ${model}, retrying once. Raw:`, result.text.slice(0, 200))
+        const retry = await generateHFResponse(prompt, { ...genConfig, model, maxRetries: 0 })
+        parsed = parseAnalysisJson(retry.text)
+      }
+
+      if (parsed) {
+        if (isFallback) console.info(`[analyze] fallback model ${model} succeeded`)
+        // Store in memory cache (instant next time)
+        memCache.set(memKey, parsed)
+        if (cacheKey) {
+          await redisSetJson(cacheKey, parsed, {
+            ttlSeconds: typeof cacheTtlSeconds === "number" ? cacheTtlSeconds : 24 * 60 * 60,
+          })
+        }
+        return parsed
+      }
+
+      // Parsed failed — if there's a fallback, try it instead of throwing
+      lastError = new AnalysisError("AI returned an unexpected format.", "BAD_LLM_OUTPUT")
+      if (isFallback || modelsToTry.length === 1) throw lastError
+      console.warn(`[analyze] primary model ${model} returned bad output, trying fallback...`)
+      continue
+    } catch (err) {
+      lastError = err
+      // If this is the last model, throw
+      if (isFallback || modelsToTry.length === 1) throw err
+      // Otherwise, log and try fallback
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn(`[analyze] primary model ${model} failed (${msg}), trying fallback ${modelsToTry[1]}...`)
+      continue
+    }
   }
 
-  return parsed
+  // Should never reach here
+  throw lastError ?? new AnalysisError("AI returned an unexpected format.", "BAD_LLM_OUTPUT")
 }
 
 export function mapErrorToHttp(err: unknown): { statusCode: number; payload: Record<string, unknown> } {
@@ -210,7 +460,14 @@ export function mapErrorToHttp(err: unknown): { statusCode: number; payload: Rec
     }
 
     if (err.code === "SERVER_MISCONFIGURED") {
-      return { statusCode: 500, payload: { error: "Server misconfigured.", code: "SERVER_MISCONFIGURED" } }
+      const isProd = (process.env.NODE_ENV ?? "").toLowerCase() === "production"
+      return {
+        statusCode: 500,
+        payload: {
+          error: isProd ? "Server misconfigured." : err.message,
+          code: "SERVER_MISCONFIGURED",
+        },
+      }
     }
 
     if (err.code === "BAD_LLM_OUTPUT") {

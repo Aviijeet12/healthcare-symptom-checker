@@ -1,16 +1,56 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { AlertCircle, CheckCircle2, Lightbulb } from "lucide-react"
+import { AlertCircle, CheckCircle2, ChevronDown, Lightbulb } from "lucide-react"
+
+interface Condition {
+  name: string
+  description: string
+}
 
 interface AnalysisResult {
-  conditions: string[]
+  conditions: Condition[]
   recommendations: string
   disclaimer: string
 }
 
 interface ResultsCardProps {
   results: AnalysisResult
+}
+
+function ConditionCard({ condition, index }: { condition: Condition; index: number }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <button
+      type="button"
+      onClick={() => condition.description && setExpanded(!expanded)}
+      className={`w-full text-left p-4 bg-slate-800 rounded-lg border transition-all group ${
+        expanded
+          ? "border-blue-500 shadow-lg shadow-blue-500/10"
+          : "border-blue-700 hover:border-blue-500 hover:shadow-md"
+      } ${condition.description ? "cursor-pointer" : "cursor-default"}`}
+    >
+      <div className="flex items-center gap-4">
+        <div className="flex-shrink-0 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center group-hover:bg-blue-500 transition-colors">
+          <span className="text-white font-bold text-sm">{index + 1}</span>
+        </div>
+        <span className="text-white font-semibold flex-1">{condition.name}</span>
+        {condition.description && (
+          <ChevronDown
+            className={`w-5 h-5 text-blue-400 transition-transform duration-300 ${
+              expanded ? "rotate-180" : ""
+            }`}
+          />
+        )}
+      </div>
+      {expanded && condition.description && (
+        <div className="mt-3 ml-12 pt-3 border-t border-slate-700">
+          <p className="text-sm text-slate-300 leading-relaxed">{condition.description}</p>
+        </div>
+      )}
+    </button>
+  )
 }
 
 export default function ResultsCard({ results }: ResultsCardProps) {
@@ -39,18 +79,13 @@ export default function ResultsCard({ results }: ResultsCardProps) {
         <div className="space-y-3">
           {results.conditions && results.conditions.length > 0 ? (
             results.conditions.map((condition, index) => (
-              <div
-                key={index}
-                className="flex items-start gap-4 p-4 bg-slate-800 rounded-lg border border-blue-700 hover:border-blue-500 hover:shadow-md transition-all group"
-              >
-                <div className="flex-shrink-0 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center group-hover:bg-blue-500 transition-colors">
-                  <span className="text-white font-bold text-sm">{index + 1}</span>
-                </div>
-                <span className="text-white font-semibold pt-0.5">{condition}</span>
-              </div>
+              <ConditionCard key={index} condition={condition} index={index} />
             ))
           ) : (
             <p className="text-slate-400 text-center py-4">No conditions identified.</p>
+          )}
+          {results.conditions.some((c) => c.description) && (
+            <p className="text-xs text-blue-400 text-center pt-1">Click a condition to learn more</p>
           )}
         </div>
       </div>

@@ -7,8 +7,13 @@ import Header from "@/components/header"
 import Footer from "@/components/footer"
 import { Sparkles } from "lucide-react"
 
+interface Condition {
+  name: string
+  description: string
+}
+
 interface AnalysisResult {
-  conditions: string[]
+  conditions: Condition[]
   recommendations: string
   disclaimer: string
 }

@@ -23,5 +23,9 @@ next-dev.stderr.log
 
 # Lambda build artifacts (generated locally)
 lambda-build/
+lambda-deploy/
 lambda-backend.zip
 lambda-backend-posix.zip
+
+# SST
+.sst/

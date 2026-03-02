@@ -1,6 +1,25 @@
-import { createClient } from "redis"
+type RedisClient = {
+  isOpen?: boolean
+  connect: () => Promise<void>
+  quit: () => Promise<void>
+  on: (event: string, listener: (...args: unknown[]) => void) => void
+  get: (key: string) => Promise<string | null>
+  set: (key: string, value: string, opts?: unknown) => Promise<unknown>
+}
 
-type RedisClient = ReturnType<typeof createClient>
+async function tryLoadRedisModule(): Promise<null | { createClient: (opts: { url: string }) => RedisClient }> {
+  try {
+    // Dynamic import keeps `redis` optional for Lambda zip deployments.
+    // If the package isn't present (no node_modules in the zip), we just disable caching.
+    const mod = (await import("redis")) as unknown as { createClient?: (opts: { url: string }) => RedisClient }
+    if (typeof mod?.createClient !== "function") return null
+    return { createClient: mod.createClient }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(`[redis] module_not_available; caching disabled (${message})`)
+    return null
+  }
+}
 
 declare global {
   // eslint-disable-next-line no-var
@@ -47,17 +66,26 @@ export async function getRedisClient(): Promise<RedisClient | null> {
 
   if (!globalThis.__symptomCheckerRedisClientPromise) {
     globalThis.__symptomCheckerRedisClientPromise = (async () => {
+      const redisMod = await tryLoadRedisModule()
+      if (!redisMod) {
+        return null
+      }
+
       let client: RedisClient
       try {
-        client = createClient({ url })
+        client = redisMod.createClient({ url })
       } catch (err) {
         console.warn(`[redis] create_client_failed ${err instanceof Error ? err.message : String(err)}`)
         return null
       }
 
+      let redisErrorLogged = false
       client.on("error", (err) => {
-        // Avoid logging request payloads; log only the error message.
-        console.warn(`[redis] error ${err instanceof Error ? err.message : String(err)}`)
+        // Log only once to avoid spamming CloudWatch / console
+        if (!redisErrorLogged) {
+          redisErrorLogged = true
+          console.warn(`[redis] error ${err instanceof Error ? err.message : String(err)}`)
+        }
       })
 
       try {

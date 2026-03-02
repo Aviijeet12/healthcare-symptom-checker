@@ -15,7 +15,8 @@
     "lint:backend": "node scripts/backend-python.mjs -m ruff check .",
     "redis:up": "docker compose up -d redis",
     "redis:down": "docker compose down",
-    "check:all": "pnpm lint && pnpm lint:backend && pnpm test:backend"
+    "check:all": "pnpm lint && pnpm lint:backend && pnpm test:backend",
+    "lambda:build": "node scripts/build-lambda.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

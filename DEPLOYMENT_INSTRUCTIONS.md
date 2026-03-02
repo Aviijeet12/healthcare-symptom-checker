@@ -44,6 +44,33 @@ Notes:
 - Vercel does not run docker-compose services. For Redis on Vercel, you must use a managed Redis and set `REDIS_URL`.
 
 
+## AWS Lambda + API Gateway (Optional)
+
+This repo includes a Lambda handler at `lambda/analyze.ts`. When you set `ANALYZE_API_URL` in Vercel/Next.js, the Next.js route `POST /api/analyze` will proxy requests to your API Gateway endpoint.
+
+If you see `502` from the browser for `/api/analyze`, and you're proxying to API Gateway, the `502` is usually coming from API Gateway (not the Next.js app) due to one of:
+- Lambda timed out (HF call/model loading took too long)
+- API Gateway integration timeout
+- "Malformed Lambda proxy response" (wrong response shape)
+- Missing Lambda invoke permissions for API Gateway
+
+Recommended API Gateway configuration:
+- Use HTTP API (v2) or REST API with *Lambda proxy integration*
+- Route: `POST /analyze` -> Lambda integration
+- Integration timeout: keep within 29s for HTTP API; set Lambda timeout accordingly
+
+Recommended Lambda environment variables:
+- `HF_API_KEY` (required)
+- `HF_MODEL_NAME` (required)
+- `ANALYZE_TIMEOUT_MS=25000` (recommended for API Gateway time budgets)
+- `HF_MAX_RETRIES=1` (optional; reduce retries to avoid long tail latency)
+- `HF_WAIT_FOR_MODEL_MAX_MS=8000` (optional; reduce model-loading polling)
+
+If 502 persists, check:
+- CloudWatch logs for the Lambda function (exceptions, timeouts)
+- API Gateway logs for "integration error" or "malformed proxy response"
+
+
 ## Local “Production-like” Run (Redis + App)
 
 Prerequisite: Docker Desktop must be running.

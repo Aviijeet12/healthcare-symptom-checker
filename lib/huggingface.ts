@@ -158,6 +158,9 @@ export async function generateHFResponse(
 
   const url = `${baseUrl}/chat/completions`
 
+  const systemMessage =
+    "You are a cautious health education assistant. Respond with ONLY a single valid JSON object and no extra text (no markdown, no code fences)."
+
   const startAll = Date.now()
   let retries = 0
 
@@ -179,7 +182,10 @@ export async function generateHFResponse(
         },
         body: JSON.stringify({
           model,
-          messages: [{ role: "user", content: cleanedPrompt }],
+          messages: [
+            { role: "system", content: systemMessage },
+            { role: "user", content: cleanedPrompt },
+          ],
           temperature,
           max_tokens: maxTokens,
           stream: false,
